@@ -1,0 +1,85 @@
+{
+  "comment": "Sources and target icon lists for each pack. tools/fetch_icons.py reads this.",
+  "packs": {
+    "aws": {
+      "source": "https://aws.amazon.com/architecture/icons/",
+      "source_zip": "https://d1.awsstatic.com/webteam/architecture-icons/q1-2024/Asset-Package_02072024.b5dee0f8b5b22d6d4daadbc1d7e3e7c6d1e8b3f1.zip",
+      "license": "AWS Trademark Guidelines — usage permitted in customer architecture diagrams",
+      "must_have": [
+        "ec2", "lambda", "rds", "aurora", "dynamodb", "s3", "cloudfront", "alb", "nlb",
+        "api-gateway", "cognito", "iam", "kms", "secrets-manager", "vpc", "subnet",
+        "internet-gateway", "nat-gateway", "route53", "cloudwatch", "sns", "sqs",
+        "kinesis", "msk", "eventbridge", "eks", "ecs", "fargate", "elasticache",
+        "opensearch", "step-functions", "bedrock", "sagemaker"
+      ]
+    },
+    "azure": {
+      "source": "https://learn.microsoft.com/en-us/azure/architecture/icons/",
+      "source_zip": "https://arch-center.azureedge.net/icons/Azure_Public_Service_Icons_V19.zip",
+      "license": "Microsoft Azure architecture icon usage guidelines",
+      "must_have": [
+        "virtual-machine", "app-service", "function-app", "sql-database", "cosmos-db",
+        "blob-storage", "cdn", "application-gateway", "load-balancer", "api-management",
+        "entra-id", "key-vault", "virtual-network", "service-bus", "event-hub",
+        "event-grid", "aks", "container-instances", "monitor", "log-analytics",
+        "synapse", "data-factory", "openai-service", "ai-search"
+      ]
+    },
+    "gcp": {
+      "source": "https://cloud.google.com/icons",
+      "source_zip": "https://services.google.com/fh/files/misc/google_cloud_official_icons_october_2024.zip",
+      "license": "Google Cloud architecture icon usage guidelines",
+      "must_have": [
+        "compute-engine", "cloud-run", "cloud-functions", "cloud-sql", "spanner",
+        "bigquery", "cloud-storage", "cloud-cdn", "load-balancing", "api-gateway",
+        "iam", "kms", "vpc", "cloud-armor", "pub-sub", "dataflow",
+        "gke", "memorystore", "vertex-ai", "cloud-logging", "cloud-monitoring"
+      ]
+    },
+    "generic": {
+      "source": "self-drawn",
+      "license": "CC0",
+      "must_have": [
+        "user", "client", "server", "database", "cache", "queue", "cloud",
+        "internet", "firewall", "load-balancer", "gateway", "browser", "mobile-app",
+        "desktop-app", "external-system", "monitoring", "logging", "ci-cd", "git-repo"
+      ]
+    },
+    "container": {
+      "source": "https://github.com/cncf/artwork",
+      "license": "per-project (mostly Apache-2 / CC) — see CNCF artwork repo",
+      "must_have": [
+        "docker", "kubernetes", "helm", "containerd", "etcd", "envoy", "istio",
+        "linkerd", "argocd", "prometheus", "grafana", "loki", "tempo", "jaeger",
+        "fluentd", "open-telemetry"
+      ]
+    },
+    "network": {
+      "source": "https://www.cisco.com/c/en/us/products/visio-stencil-icons.html  +  self-drawn",
+      "license": "Cisco icons used per their public icon license; generic shapes CC0",
+      "must_have": [
+        "switch", "router", "firewall", "load-balancer", "vpn-gateway", "dns",
+        "cdn", "waf", "subnet-public", "subnet-private", "nat", "internet-gateway"
+      ]
+    },
+    "data": {
+      "source": "https://simpleicons.org/  +  https://devicon.dev/",
+      "license": "CC0 (Simple Icons), MIT (Devicon)",
+      "must_have": [
+        "kafka", "spark", "airflow", "flink", "dbt", "snowflake", "databricks",
+        "nifi", "trino", "iceberg", "delta-lake", "clickhouse", "redis",
+        "postgres", "mysql", "mongodb", "elasticsearch"
+      ]
+    },
+    "ai": {
+      "source": "https://github.com/lobehub/lobe-icons  +  self-drawn for MCP",
+      "license": "MIT",
+      "must_have": [
+        "claude", "openai", "gemini", "llama", "mistral", "deepseek",
+        "pinecone", "weaviate", "chroma", "milvus", "pgvector", "qdrant",
+        "langchain", "llamaindex", "autogen", "crewai", "mcp", "rag",
+        "agent", "tool-use", "vector-store"
+      ]
+    }
+  }
+}

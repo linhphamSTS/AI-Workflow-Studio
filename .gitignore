@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Generated diagrams (per-project output, not committed)
+skill/linhpham-technicalproposal/output/
+
+# Local config / secrets
+.env
+*.local
+
+# Build / runtime cache
+.cache/
+
+# Per-project test runs (not part of the reusable skill)
+AzureBid/
+OnPremBid/
+TestBid/
+
+# Personal profile launcher (machine-specific)
+claude-account2.ps1
