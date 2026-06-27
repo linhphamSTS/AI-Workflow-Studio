@@ -37,14 +37,28 @@ from xml.sax.saxutils import escape
 #     and select the glyph via a `prIcon=` attribute.
 _AWS_FILL = "fillColor=#E7157B;strokeColor=#ffffff;"  # AWS database/storage magenta; drawio overrides per-service
 _AWS_BASE = "sketch=0;outlineConnect=0;fontColor=#232F3E;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;"
-_AZURE_BASE = "image;aspect=fixed;html=1;points=[];align=center;fontSize=12;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;"
+# Azure uses bundled SVG image refs. fillColor/strokeColor are a graceful
+# fallback: if a specific SVG path is off, draw.io still shows a tinted Azure
+# tile with its label instead of a blank rectangle (cross-stack: no shape ever
+# renders as an empty white box — same guarantee AWS gets from resourceIcon and
+# GCP/K8s get from their stencil fill).
+_AZURE_BASE = "image;aspect=fixed;html=1;points=[];align=center;fontSize=12;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fillColor=#0078D4;strokeColor=#ffffff;"
 _GCP_BASE = "sketch=0;html=1;aspect=fixed;strokeColor=none;shadow=0;dashed=0;verticalLabelPosition=bottom;labelPosition=center;verticalAlign=top;align=center;fillColor=#4284F3;"
 _K8S_BASE = "aspect=fixed;sketch=0;html=1;dashed=0;whitespace=wrap;verticalLabelPosition=bottom;verticalAlign=top;fillColor=#326CE5;strokeColor=#ffffff;"
 
 
 def _aws(stencil: str, color: str = "#E7157B") -> str:
-    """Build an AWS4 style string with the required attributes."""
-    return f"{_AWS_BASE}fillColor={color};strokeColor=#ffffff;shape=mxgraph.aws4.{stencil};"
+    """Build an AWS4 style string using the modern `resourceIcon` form.
+
+    draw.io's AWS-2019/AWS4 library binds service glyphs through
+    `shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.<name>` — NOT the bare
+    `shape=mxgraph.aws4.<name>`, which leaves many services as empty white boxes
+    (the defect the user saw). The resourceIcon wrapper also degrades gracefully:
+    even if a `resIcon` name is slightly off, draw.io still renders the coloured
+    service tile with its label rather than a blank rectangle.
+    """
+    return (f"{_AWS_BASE}fillColor={color};strokeColor=#ffffff;"
+            f"shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.{stencil};")
 
 
 def _azure(svg_path: str) -> str:
@@ -64,9 +78,9 @@ def _k8s(pr_icon: str) -> str:
 
 SHAPE_STYLES = {
     # AWS — colors per AWS architecture-icons palette: compute orange, db magenta, storage green, net purple, ml teal
-    "aws-eks":            _aws("eks", "#ED7100"),
+    "aws-eks":            _aws("elastic_kubernetes_service", "#ED7100"),
     "aws-ec2":            _aws("ec2", "#ED7100"),
-    "aws-ecs":            _aws("ecs", "#ED7100"),
+    "aws-ecs":            _aws("elastic_container_service", "#ED7100"),
     "aws-fargate":        _aws("fargate", "#ED7100"),
     "aws-lambda":         _aws("lambda", "#ED7100"),
     "aws-aurora":         _aws("aurora", "#C925D1"),

@@ -593,23 +593,29 @@ def insert_image_after_heading(doc, heading_text: str, png_path: Path,
     return True
 
 
-def drop_section_if_empty(doc, heading_text: str, mapping: dict) -> bool:
+def drop_section_if_empty(doc, heading_text: str, mapping: dict, content_key: str | None = None) -> bool:
     """If the value for the section's content key is null/empty, remove the heading
     and any following paragraphs up to the next heading at same-or-higher level.
     Returns True if section was dropped.
 
-    Key derivation: heading text -> lowercased, spaces/dashes/braces stripped.
-    "Mobile App Strategy" -> "mobile_app_strategy"
-    "{{TECHSTACK_DATA}}"   -> "techstack_data"
+    `content_key`, when given, is the exact mapping key to test (use this when the
+    heading TEXT no longer equals the key, e.g. a "Data" heading whose content key
+    is "techstack_data"). When omitted, the key is derived from the heading text:
+    lowercased, spaces/dashes/braces stripped ("Mobile App Strategy" ->
+    "mobile_app_strategy").
     """
     heading = find_heading_paragraph(doc, heading_text)
     if heading is None:
         return False
 
-    key = heading_text.lower()
-    key = re.sub(r"[{}]", "", key)
-    key = re.sub(r"[\s\-]+", "_", key).strip("_")
-    if mapping.get(key) not in (None, "", "null"):
+    if content_key is not None:
+        key = content_key
+    else:
+        key = heading_text.lower()
+        key = re.sub(r"[{}]", "", key)
+        key = re.sub(r"[\s\-]+", "_", key).strip("_")
+    # Empty == None / "" / "null" / [] (an empty techstack array is also "no section").
+    if mapping.get(key) not in (None, "", "null", []):
         return False
 
     own_level = int(heading.style.name.split()[-1])
@@ -1171,10 +1177,13 @@ def _build_techstack_table(doc, items: list[dict], header_fill: str = "595959"):
     return tbl
 
 
-def render_techstack_tables(doc, replacements: dict) -> int:
+def render_techstack_tables(doc, replacements: dict) -> set:
     """For every techstack_* key whose value is a list of {name, [logo,] description} dicts,
-    find its {{KEY}} placeholder paragraph and replace it with a styled 2-col table."""
-    count = 0
+    find its {{KEY}} placeholder paragraph and replace it with a styled 2-col table.
+    Returns the set of keys that were rendered as tables (so the caller skips the
+    optional-section drop for them — their placeholder paragraph is already gone and
+    a table now sits under the heading)."""
+    rendered = set()
     for key, val in list(replacements.items()):
         if not key.startswith("techstack_") or not isinstance(val, list) or not val:
             continue
@@ -1196,8 +1205,8 @@ def render_techstack_tables(doc, replacements: dict) -> int:
         target._p.getparent().remove(target._p)
         # Mark replacement so the text-replacement step doesn't try to fill it
         replacements[key] = ""
-        count += 1
-    return count
+        rendered.add(key)
+    return rendered
 
 
 def normalize_body_spacing(doc) -> int:
@@ -1310,9 +1319,9 @@ def build(template: Path, replacements: dict, diagrams: list, out: Path) -> None
     # 1. Text replacements across body, tables, and headers/footers.
     # Pre-pass: any techstack_* value that's a list of {name, description} dicts
     # is converted to a styled 2-col table at the placeholder position.
-    n_tech_tables = render_techstack_tables(doc, replacements)
-    if n_tech_tables:
-        print(f"Techstack tables rendered: {n_tech_tables}")
+    rendered_tech = render_techstack_tables(doc, replacements)
+    if rendered_tech:
+        print(f"Techstack tables rendered: {len(rendered_tech)} ({', '.join(sorted(rendered_tech))})")
 
     total = 0
     for p in doc.paragraphs:
@@ -1335,9 +1344,19 @@ def build(template: Path, replacements: dict, diagrams: list, out: Path) -> None
     # lowercasing + underscoring (see drop_section_if_empty). The headings
     # below have been chosen so the derived key matches the documented
     # Phase 4 schema (mobile_app_strategy, techstack_data, techstack_ai).
+    # Heading text -> explicit content key. The Data/AI sub-headings now carry a
+    # fixed label ("Data" / "AI") with the {{TECHSTACK_*}} placeholder in the body
+    # paragraph beneath, so the content key must be passed explicitly. Skip the
+    # drop for any techstack section already rendered as a table (its placeholder
+    # is gone and a table sits under the heading — dropping would delete the table).
+    drop_specs = [("Mobile App Strategy", None)]
+    if "techstack_data" not in rendered_tech:
+        drop_specs.append(("Data", "techstack_data"))
+    if "techstack_ai" not in rendered_tech:
+        drop_specs.append(("AI", "techstack_ai"))
     dropped = 0
-    for optional in ("Mobile App Strategy", "{{TECHSTACK_DATA}}", "{{TECHSTACK_AI}}"):
-        if drop_section_if_empty(doc, optional, replacements):
+    for heading_text, ckey in drop_specs:
+        if drop_section_if_empty(doc, heading_text, replacements, ckey):
             dropped += 1
     print(f"Optional sections dropped: {dropped}")
 

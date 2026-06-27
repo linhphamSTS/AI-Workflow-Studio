@@ -446,17 +446,30 @@ include:
   "purpose": "...",
   "system_overview_intro": "...",
   "diagram_captions": { "<diagram_slug>": "<title only — no 'Figure N:' prefix>" },
-  "techstack_backend": "...",
-  "techstack_frontend": "...",
-  "techstack_database": "...",
-  "techstack_server_hosting": "...",
-  "techstack_data": "... | null",
-  "techstack_ai": "... | null",
+  "techstack_backend":        [ {"name": "...", "description": "..."}, ... ],
+  "techstack_frontend":       [ {"name": "...", "description": "..."}, ... ],
+  "techstack_database":       [ {"name": "...", "description": "..."}, ... ],
+  "techstack_server_hosting": [ {"name": "...", "description": "..."}, ... ],
+  "techstack_data":           [ {"name": "...", "description": "..."}, ... ]  | null,
+  "techstack_ai":             [ {"name": "...", "description": "..."}, ... ]  | null,
   "mobile_app_strategy": "... | null",
   "case_study_title": "...",
   "summary_body": "..."
 }
 ```
+
+> **TECHSTACK FORMAT — MANDATORY (2-col tables, the Tay Ho reference).** Every
+> `techstack_*` value MUST be a **JSON array of `{"name", "description"}`
+> objects — NOT a prose paragraph.** `build_docx.py` renders each array as a
+> styled 2-column **`Technology | Advantages`** table (shaded bold header,
+> bordered, ~33%/67% columns) exactly like the Tay Ho proposal. One row per
+> **concrete technology / framework / library / managed service** (e.g.
+> "Go 1.23", "ASP.NET Core", "Amazon Aurora PostgreSQL 16", "Amazon EKS",
+> "Amazon MSK (Kafka)", "Terraform"), with the `description` giving that
+> item's advantage / role in 1-2 sentences. Aim for roughly 5-12 rows per
+> sub-section (Back-end is usually the longest). A prose string here is a
+> FORMAT DEFECT the reviewer rejects (`techstack_not_table`). Use `null`
+> only for `techstack_data` / `techstack_ai` when that tier is out of scope.
 
 **Required keys** — the template carries `{{KEY}}` placeholders for every
 key above. Missing keys are caught by the strict reviewer's

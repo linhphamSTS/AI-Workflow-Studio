@@ -460,6 +460,54 @@ def check_justify_whitespace_channels(docx_path: Path, report: Report) -> None:
         report.pass_("no_justify_soft_returns")
 
 
+_TECHSTACK_LABELS = {
+    "back-end", "backend", "front-end", "frontend", "database",
+    "server & hosting", "server and hosting", "data", "ai", "ai / ml", "ai & ml",
+}
+
+
+def check_techstack_is_table(docx_path: Path, report: Report) -> None:
+    """Each Technology Stack sub-heading (Back-end / Front-end / Database /
+    Server & Hosting / Data / AI) MUST be immediately followed by a 2-column
+    'Technology | Advantages' table, NOT a prose paragraph — the Tay Ho
+    reference format. Prose here is a zero-tolerance format defect
+    (`techstack_not_table`): the content-writer emitted a string instead of the
+    required array of {name, description} rows."""
+    doc = Document(str(docx_path))
+    pmap = {p._p: p for p in doc.paragraphs}
+    tmap = {t._tbl: t for t in doc.tables}
+    children = list(doc.element.body.iterchildren())
+    bad = []
+    for idx, child in enumerate(children):
+        p = pmap.get(child)
+        if p is None:
+            continue
+        if (p.style.name if p.style else "") != "Heading 6":
+            continue
+        if (p.text or "").strip().lower() not in _TECHSTACK_LABELS:
+            continue
+        nxt = None
+        for follow in children[idx + 1:]:
+            if follow in tmap:
+                nxt = ("tbl", None); break
+            fp = pmap.get(follow)
+            if fp is not None:
+                if (fp.text or "").strip() == "":
+                    continue  # skip blank spacer paragraphs
+                nxt = ("p", (fp.text or "")[:60]); break
+        if nxt is None or nxt[0] != "tbl":
+            bad.append(((p.text or "").strip(), nxt[1] if nxt else "(nothing)"))
+    if bad:
+        report.add(Issue(
+            "techstack_not_table", "visual", "blocker", False,
+            f"{len(bad)} Technology Stack sub-section(s) render as prose instead of a "
+            f"'Technology | Advantages' table (Tay Ho format)",
+            detail="; ".join(f"'{h}' -> {prev}" for h, prev in bad),
+        ))
+    else:
+        report.pass_("techstack_is_table")
+
+
 # ---------------------------------------------------------------------------
 # Runner.
 # ---------------------------------------------------------------------------
@@ -484,6 +532,7 @@ CHECKS = [
     ("caption_followed_by_gap",        check_caption_followed_by_gap),
     ("settings_flags_present",         check_settings_flags_present),
     ("justify_whitespace_channels",    check_justify_whitespace_channels),
+    ("techstack_is_table",             check_techstack_is_table),
 ]
 
 

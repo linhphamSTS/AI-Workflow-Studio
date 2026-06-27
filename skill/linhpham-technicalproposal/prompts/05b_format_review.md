@@ -133,8 +133,17 @@ Default = **strict**. Items flagged in strict mode:
 The user has accepted slower iterations for a higher quality bar. Do not
 soften the checklist without a direct instruction. **Reviewer agents MUST
 NOT report PASS** until `bullet_number_duplicate`, `image_text_crush`,
-`heading_deeper_than_body`, `heading_section_spacing_tight`, and
-`settings_flags_missing` are all clear in `format_review.json`.
+`heading_deeper_than_body`, `heading_section_spacing_tight`,
+`settings_flags_missing`, and `techstack_not_table` are all clear in
+`format_review.json`.
+
+- [ ] **Every Technology Stack sub-section (Back-end / Front-end / Database /
+      Server & Hosting / Data / AI) renders as a 2-column `Technology |
+      Advantages` table, not a prose paragraph** (`techstack_not_table`). This
+      matches the Tay Ho reference format. It is NOT auto-fixable — it means the
+      content-writer emitted a prose string instead of the required array of
+      `{name, description}` rows; the fix is to regenerate that techstack value
+      as an array and rebuild. Escalate if it survives.
 
 ## Output
 
