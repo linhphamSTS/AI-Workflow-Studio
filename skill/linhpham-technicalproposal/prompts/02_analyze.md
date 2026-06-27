@@ -266,6 +266,22 @@ Examples of how the choice flows from context:
 >   constraint. Be impartial: the client pays for the best-fit architecture,
 >   not the bidder's convenience.
 
+> **POLYGLOT LANGUAGE — ONE OR SEVERAL, WHEN JUSTIFIED (be smart).** A
+> project is **not** required to pick a single backend language. Like
+> polyglot persistence, use **one OR more** languages, each matched to the
+> workload it genuinely fits — e.g. Go for the high-concurrency real-time
+> core, Python for ML / recommendation / data-science, JVM (Java/Kotlin)
+> for heavy stream processing, Node/TS for an IO-bound BFF. This is how
+> comparable at-scale products (Grab/Uber/Gojek) actually run. **But keep
+> it disciplined — don't over-fragment:** each extra language adds toolchain,
+> CI, observability and operational spread, so add one only when a
+> service-group's workload clearly rewards it; otherwise a primary language
+> covering most services is better. State the **primary language** and any
+> **secondary languages with the specific service-group each owns and why**,
+> in the §2 Backend row and §3. A single language is the right answer when
+> nothing in the feature set rewards a second — say so explicitly rather
+> than splitting for its own sake.
+
 > **VERSION CURRENCY (MANDATORY).** Never hardcode a framework/runtime
 > version from memory — training data goes stale. Always propose the
 > **current LTS / stable** release as of the proposal date, and add a
