@@ -1,0 +1,9 @@
+{
+  "name": "linhpham-technicalproposal-tools",
+  "private": true,
+  "type": "module",
+  "description": "Skill tooling — fetch_tech_logos.mjs rasterises devicon/simpleicons SVGs to PNG for tech-stack table logos.",
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}

@@ -446,12 +446,12 @@ include:
   "purpose": "...",
   "system_overview_intro": "...",
   "diagram_captions": { "<diagram_slug>": "<title only — no 'Figure N:' prefix>" },
-  "techstack_backend":        [ {"name": "...", "description": "..."}, ... ],
-  "techstack_frontend":       [ {"name": "...", "description": "..."}, ... ],
-  "techstack_database":       [ {"name": "...", "description": "..."}, ... ],
-  "techstack_server_hosting": [ {"name": "...", "description": "..."}, ... ],
-  "techstack_data":           [ {"name": "...", "description": "..."}, ... ]  | null,
-  "techstack_ai":             [ {"name": "...", "description": "..."}, ... ]  | null,
+  "techstack_backend":        [ {"name": "...", "logo": "pack/icon", "description": "..."}, ... ],
+  "techstack_frontend":       [ {"name": "...", "logo": "pack/icon", "description": "..."}, ... ],
+  "techstack_database":       [ {"name": "...", "logo": "pack/icon", "description": "..."}, ... ],
+  "techstack_server_hosting": [ {"name": "...", "logo": "pack/icon", "description": "..."}, ... ],
+  "techstack_data":           [ {"name": "...", "logo": "pack/icon", "description": "..."}, ... ]  | null,
+  "techstack_ai":             [ {"name": "...", "logo": "pack/icon", "description": "..."}, ... ]  | null,
   "mobile_app_strategy": "... | null",
   "case_study_title": "...",
   "summary_body": "..."
@@ -470,6 +470,35 @@ include:
 > sub-section (Back-end is usually the longest). A prose string here is a
 > FORMAT DEFECT the reviewer rejects (`techstack_not_table`). Use `null`
 > only for `techstack_data` / `techstack_ai` when that tier is out of scope.
+>
+> **LOGO PER ROW (the Tay Ho reference has a logo on EVERY row).** Each row
+> SHOULD carry `"logo": "pack/icon"`; `build_docx` embeds that PNG above the
+> bold name in column 1. It resolves to `assets/icons/<pack>/png/<icon>.png`.
+> Packs: `aws/` (AWS service icons — e.g. `aws/aurora-instance`,
+> `aws/elastic-kubernetes-service-rounded`, `aws/elasticache-for-redis`,
+> `aws/managed-streaming-for-kafka`, `aws/simple-queue-service-sqs-message`,
+> `aws/simple-storage-service-s3-bucket-with-objects`, `aws/secrets-manager`,
+> `aws/cloudwatch-alarm`, `aws/elastic-load-balancing`,
+> `aws/cloudfront-download-distribution`, `aws/ec2-container-registry-rounded`);
+> `azure/` and `gcp/` (their cloud service icons); `data/` (languages /
+> frameworks / libraries / dev tools — e.g. `data/go`, `data/nodejs`,
+> `data/nestjs`, `data/react`, `data/flutter`, `data/dart`, `data/typescript`,
+> `data/vite`, `data/antdesign`, `data/i18next`, `data/playwright`,
+> `data/vitest`, `data/opentelemetry`, `data/postgresql`, `data/redis`,
+> `data/apachekafka`, `data/terraform`, `data/githubactions`, `data/docker`,
+> `data/kubernetes`, `data/prometheus`, `data/grafana`, `data/dotnetcore`,
+> `data/java`, `data/spring`, `data/python`, `data/rust`, `data/vuejs`,
+> `data/angular`, `data/svelte`, `data/kotlin`, `data/nginx`, `data/rabbitmq`,
+> `data/graphql`, `data/mysql`, `data/mongodb`, `data/swift`, `data/helm`,
+> `data/elasticsearch`); `generic/` fallbacks (`generic/mobile-app`,
+> `generic/server`). Rules: (1) pick the icon whose name best matches the
+> row's primary product; (2) for a library row with no own logo, reuse its
+> **ecosystem** logo (Tay Ho put the .NET logo on every .NET row — likewise
+> `data/go` for Go libraries, `data/react` for React-ecosystem rows);
+> (3) **confirm the PNG exists in the pack before referencing it** — if a
+> needed language/tool logo is missing, run `tools/fetch_tech_logos.mjs`
+> (devicon / simpleicons source) to add it BEFORE assembling. Omit `logo`
+> only when no sensible icon exists.
 
 **Required keys** — the template carries `{{KEY}}` placeholders for every
 key above. Missing keys are caught by the strict reviewer's
