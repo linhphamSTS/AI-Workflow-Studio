@@ -1,5 +1,28 @@
 # Phase 6 — Final report
 
+## Step A — Record lessons (MANDATORY, before the hand-off message)
+
+Append a new entry to `LESSONS_LEARNED.md` at the skill root (create the file from
+the template shape if it is missing). Capture, concretely and reusably:
+
+- Project + proposal type + date (absolute date).
+- Stack/architecture proposed and why.
+- Format/layout issues hit this run and their fixes (SharePoint compat, >=300 DPI,
+  overflow, template structure, font/spacing drift, widow/orphan).
+- Diagram-quality issues and fixes (missing icon, chip/arrow collision, centring,
+  label overflow).
+- Content gaps or client feedback and how they were corrected.
+- A "do better next time" checklist future runs should apply up-front.
+
+If a lesson is broadly true (not project-specific), ALSO fold it into the relevant
+phase prompt (`04_generate.md` for diagram/content rules, `05b_format_review.md` for
+format checks) so it is enforced automatically next time — and note in the entry that
+you promoted it. Newest entry goes on top of the Entries section.
+
+This step is not optional: it is how the skill self-improves across runs and machines.
+
+## Step B — Hand-off message
+
 Produce a concise hand-off message to the user.
 
 ## Format

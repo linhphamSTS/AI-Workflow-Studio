@@ -3,6 +3,15 @@
 The user invoked `/linhpham-technicalproposal <projectname>`. Find a folder whose
 name fuzzy-matches `<projectname>` and contains input files.
 
+## Step 0 — Load accumulated lessons (MANDATORY, do this first)
+
+Read `LESSONS_LEARNED.md` at the skill root (sibling of `SKILL.md`). Internalise
+every entry as a hard constraint / preference for THIS run: if a past entry names a
+concrete fix (a format setting, diagram rule, content gap, forbidden phrase), apply
+it proactively from the start — do not wait to rediscover the problem. This is how
+the skill self-improves across runs and machines. If the file is missing, continue
+(it will be created in Phase 6).
+
 ## Search strategy
 
 Do **NOT** hard-code customer-, bid-, or user-specific paths. Discover dynamically:
