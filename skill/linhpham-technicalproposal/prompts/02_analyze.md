@@ -471,6 +471,28 @@ timeline, 4 bounded contexts with similar NFRs ⇒ modular monolith on EKS;
 event-driven for tier-evaluation side-effects; no serverless because
 P95 < 400 ms on a hot mobile path."
 
+> **WHY-CHOSEN + WHY-NOT-THE-OTHERS IS MANDATORY (every major decision).**
+> Architecture, backend language, frontend, mobile, database, cloud,
+> compute, messaging, CI/CD — for each, the proposal must state **(a) why
+> the chosen option fits THIS bid, (b) why each realistic alternative was
+> rejected, and (c) the trade-off accepted.** A choice with no rejected
+> alternatives reads as a template default and fails review.
+> - **§2 tech-stack rows** already enforce this via the `Rejected: <alt>
+>   (<why>)` + `Trade-off:` structure — fill it for every row, including
+>   the **backend language** (e.g. "why .NET and not Java/Node/Go/Python").
+> - **§3 architecture** must do the same in prose: name the chosen style
+>   AND explicitly reject the others it was weighed against — e.g. "**Micro-
+>   services** (honouring the client's stated requirement) — chosen over a
+>   **modular monolith** (which we'd otherwise prefer at this team size, but
+>   the client specified service isolation), over a **pure monolith**
+>   (cannot scale the real-time hot path independently), and over
+>   **serverless** (persistent websocket + sub-second dispatch latency rule
+>   it out). Trade-off: higher DevOps/operational cost, mitigated by coarse-
+>   grained service boundaries." Never present an architecture style without
+>   saying why the 2-3 plausible alternatives lost.
+> Keep it honest and specific — not "X is more scalable" but the concrete
+> reason tied to a requirement, NFR, or constraint in THIS bid.
+
 ### 4. Diagram inventory — only what this project needs
 
 The count is **driven by the proposed solution**, not by a fixed quota.
