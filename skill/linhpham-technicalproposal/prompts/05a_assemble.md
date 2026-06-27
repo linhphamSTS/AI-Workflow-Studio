@@ -6,9 +6,14 @@ Run `build_docx.py` with the outputs from Phase 4.
 python scripts/build_docx.py \
     --template templates/proposal_template.docx \
     --replacements <project_dir>/output/replacements.json \
-    --diagrams <project_dir>/output/diagrams.json \
+    --diagrams <project_dir>/output/diagrams/diagrams.json \
     --out "<project_dir>/output/{Project} - High Level Technical Proposal.docx"
 ```
+
+> **Path note:** Agent A (Phase 4) writes `diagrams.json` INSIDE the
+> `output/diagrams/` folder (alongside the PNGs), so `--diagrams` must point
+> to `<project_dir>/output/diagrams/diagrams.json` — not `output/diagrams.json`.
+> Passing the wrong path fails with "diagrams missing".
 
 `build_docx.py` is responsible for:
 

@@ -660,11 +660,16 @@ def drop_section_if_empty(doc, heading_text: str, mapping: dict) -> bool:
 # heading reads as introducing the block that follows rather than floating
 # loose between two equal whitespace gulfs. Values are in points and are
 # floors — if the template already has more, we leave it alone.
-_HEADING_MIN_SPACE_BEFORE = {1:  8, 2:  8, 3:  8, 4:  6, 5:  6, 6:  4}
+# Floors MUST match the strict reviewer's heading_section_spacing_tight floors
+# (H1-H3 >= 24pt, H4-H5 >= 18pt, H6 >= 12pt space-before) so that re-running
+# build_docx after auto_fix does NOT clamp headings back below the reviewer
+# floor and re-introduce the defect. Kept in sync with format_reviewer.py.
+_HEADING_MIN_SPACE_BEFORE = {1: 24, 2: 24, 3: 24, 4: 18, 5: 18, 6: 12}
 _HEADING_MIN_SPACE_AFTER  = {1:  6, 2:  6, 3:  6, 4:  5, 5:  5, 6:  4}
-# Hard CEILING — keeps section transitions visible without going loose.
-_HEADING_MAX_SPACE_BEFORE = {1: 10, 2: 10, 3: 10, 4:  8, 5:  8, 6:  6}
-_HEADING_MAX_SPACE_AFTER  = {1:  8, 2:  8, 3:  8, 4:  7, 5:  7, 6:  5}
+# Hard CEILING — keeps section transitions visible without going loose; must
+# sit ABOVE the reviewer floors above so the ceiling never clamps below them.
+_HEADING_MAX_SPACE_BEFORE = {1: 36, 2: 36, 3: 36, 4: 28, 5: 28, 6: 20}
+_HEADING_MAX_SPACE_AFTER  = {1: 14, 2: 14, 3: 14, 4: 12, 5: 12, 6: 10}
 
 
 def boost_heading_spacing(doc) -> int:
