@@ -382,9 +382,29 @@ include everything, seniors include only what they can defend.
 ### 3. Architecture style
 
 One paragraph: monolith / modular monolith / microservices / event-driven /
-serverless / hybrid. Justify the choice against scale, team size, and
-deployment constraints in the RFP. **Don't default to microservices** —
-it's almost always wrong for the timeline/team-size of an STS bid.
+serverless / hybrid.
+
+> **RESPECT AN EXPLICIT CLIENT ARCHITECTURE (HARD CONSTRAINT — CHECK FIRST).**
+> Before choosing anything, scan the RFP / requirement / WBS for an
+> architecture the client has ALREADY specified (e.g. "containerised
+> microservices", "serverless", "monolith", a named orchestrator/cloud, an
+> event-driven mandate). If they stated one, treat it as a `hard`
+> constraint and design the **best possible version of what they asked
+> for** — do NOT override it with the default below. Mark the §2
+> Architecture row `hard` and cite the source sentence. If your senior-SA
+> judgement sees a genuine risk in their choice (e.g. full microservices
+> for a small team / short timeline, or serverless on a sub-300 ms hot
+> path), SURFACE the concern: state the trade-off and what you would
+> otherwise recommend, in §3 and §6 — but ultimately **DEFER to the
+> client's stated requirement**. Never silently swap their architecture for
+> your preferred one; the client reading the proposal must see their own
+> requirement honoured.
+>
+> **Only when the client is SILENT on architecture** do you choose freely.
+> Then: **don't default to microservices** — it's almost always wrong for
+> the timeline/team-size of a typical STS bid; a modular monolith is the
+> usual best fit (see framework below). Justify against scale, NFR profile,
+> bounded contexts and deployment constraints.
 
 > **SMART GROUNDING — never state a fact the inputs don't contain; infer it
 > intelligently and label it.** Team size, delivery timeline, budget and
