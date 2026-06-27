@@ -228,11 +228,31 @@ estate, or a hard constraint.
 
 Examples of how the choice flows from context:
 
-- Backend language: `.NET` if the client team is .NET-strong; `Spring
-  Boot` if Java estate; `Node + NestJS` if a lean team and IO-bound;
-  `Go` if a sidecar / network-heavy footprint; `Python (FastAPI)` if
-  data-science adjacency; `Rust` only for a hard perf/safety need. The
-  options are not limited to these — pick what the RFP/estate warrants.
+- Backend language: pick by **domain fit first** — `Go` for high-concurrency
+  real-time/network cores (ride-hailing, dispatch, IoT, gateways, sidecars);
+  `JVM (Java/Kotlin)` for heavy stream-processing / big-data; `.NET` for
+  enterprise/LOB and Microsoft-estate integration; `Node + NestJS` for
+  IO-bound APIs / BFF; `Python (FastAPI)` for data-science/ML adjacency;
+  `Rust` only for a hard perf/safety need. The options are not limited to
+  these — pick what the **problem domain** warrants.
+
+> **IMPARTIALITY — choose on merit, never anchor on the vendor's comfort
+> language (MANDATORY).** Derive every stack choice from (1) the problem
+> domain + its hard NFRs, (2) what comparable at-scale products in this
+> domain actually use (Step 0b), and (3) explicit client constraints — **in
+> that order.** "The delivery team is X-strong" or "our shop usually uses X"
+> is a *secondary constraint to be flagged and costed*, NOT the primary
+> driver — do NOT silently default to the vendor's favourite language/cloud
+> and force the reader to push back. If the domain-right choice differs from
+> the team's comfort zone (e.g. a Grab-class real-time core is a Go/polyglot
+> domain, not a .NET one), **recommend the domain-right choice** and treat
+> team ramp-up / hiring as an honest risk + estimate impact in §6 — do not
+> bend the technical recommendation to avoid that conversation. A genuine
+> hard constraint (client mandates a stack, must integrate a Microsoft
+> estate, regulator requires a vendor) DOES override — but then say so
+> explicitly and cite it; "we're comfortable with it" is not such a
+> constraint. Be impartial: the client is paying for the best-fit
+> architecture, not the bidder's convenience.
 
 > **VERSION CURRENCY (MANDATORY).** Never hardcode a framework/runtime
 > version from memory — training data goes stale. Always propose the
