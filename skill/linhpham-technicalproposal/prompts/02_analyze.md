@@ -56,6 +56,40 @@ If the RFP doesn't fit any single domain cleanly, state that explicitly
 ("hybrid: ecommerce + fintech / payments due to in-app wallet") and pick
 the dominant set of concerns.
 
+### Step 0b — Benchmark against comparable products on the market (MANDATORY)
+
+A 20-year Senior SA does not design in a vacuum — they know how the
+proven, at-scale products in this domain are actually built, and they let
+that evidence shape the recommendation. After classifying the domain:
+
+1. **Name 2-4 comparable real-world products** for this app's domain
+   (e.g. ride-hailing/super-app → Grab, Gojek, Uber, Bolt; food delivery →
+   DoorDash, Deliveroo; fintech wallet → Wise, Stripe; marketplace →
+   Airbnb-class). State them explicitly in the analysis.
+2. **Recall how that class of product is typically engineered** — the
+   architectural patterns and technology categories they are known to use
+   for the hard parts (e.g. ride-hailing: in-memory geospatial index for
+   matching, dedicated low-latency dispatch service, websocket/pub-sub
+   fan-out for live tracking, event streaming for trip lifecycle, polyglot
+   persistence with a time-series store for location history). Use the
+   *pattern/category*, not a vendor logo, as the takeaway.
+3. **Map those proven patterns onto THIS bid's stack and constraints** —
+   adopt the pattern, then choose the concrete product that fits the
+   client's estate/team/cloud (e.g. "Grab-class apps run a dedicated
+   matching service on an in-memory geo index → we implement that with a
+   Redis GEO index + a .NET dispatch service on the client's Azure
+   estate"). Do NOT blindly copy another company's vendor choices; adapt
+   the proven pattern to the client's reality.
+4. **Pick the best-fit, lowest-risk option** — favour technology that is
+   battle-tested for this domain's hard problems over novel/niche choices,
+   unless a hard constraint forces otherwise. Note in the rationale when a
+   choice is "industry-proven for <domain>" and cite the comparable.
+
+Carry these comparables into §1b (the problems mirror what these products
+had to solve) and §2 (each choice can reference the proven pattern). This
+is how the proposal reads as informed by the market, not invented from
+scratch.
+
 ### Step 1 — RFP comprehension passes
 
 1. **Read the RFP end-to-end twice.** Pass 1: comprehension. Pass 2:
@@ -197,7 +231,19 @@ Examples of how the choice flows from context:
 - Backend language: `.NET` if the client team is .NET-strong; `Spring
   Boot` if Java estate; `Node + NestJS` if a lean team and IO-bound;
   `Go` if a sidecar / network-heavy footprint; `Python (FastAPI)` if
-  data-science adjacency.
+  data-science adjacency; `Rust` only for a hard perf/safety need. The
+  options are not limited to these — pick what the RFP/estate warrants.
+
+> **VERSION CURRENCY (MANDATORY).** Never hardcode a framework/runtime
+> version from memory — training data goes stale. Always propose the
+> **current LTS / stable** release as of the proposal date, and add a
+> "confirm latest LTS at kickoff" note in the rationale. For **.NET
+> specifically**: the current LTS is **.NET 10** (released Nov 2025);
+> .NET 8 LTS support ends Nov 2026 — do NOT default to .NET 8. The same
+> "use current LTS, verify don't assume" rule applies to Node (active LTS),
+> Java (latest LTS, e.g. 21/25), Spring Boot, Postgres, K8s, etc. If
+> unsure of the latest version at proposal time, say so and flag it for
+> confirmation rather than printing a stale number.
 - Cloud: client's existing landing zone if any; otherwise pick on
   service maturity for the bottleneck (Kafka → AWS, AI tooling → Azure
   or GCP, regulated GovCloud requirement → vendor-specific).
@@ -272,11 +318,28 @@ Pick from the menus below:
 
 - **Deployment target**: AWS / Azure / GCP / On-prem / Hybrid / Edge
 - **Compute**: EC2 / VM / EKS-AKS-GKE / Fargate / App Service / Bare metal containers (Docker Swarm) / Lambda-Functions
-- **Backend**: .NET 8/10, Spring Boot, Node.js (NestJS / Express), Python (FastAPI / Django), Go
+- **Backend**: .NET (latest LTS — .NET 10 as of 2026, never hardcode 8), Spring Boot (Java latest LTS), Node.js (NestJS / Express, active LTS), Python (FastAPI / Django), Go, Rust (hard perf/safety need only)
 - **Frontend**: React (Vite / Next.js), Vue, Angular, Blazor, Svelte
 - **Mobile**: React Native, Flutter, native iOS+Android, PWA-only — or omit if not needed
-- **Database**: Postgres (Aurora / Cloud SQL / managed PG) / SQL Server / MySQL / DynamoDB / Cosmos DB / MongoDB
+- **Database**: relational — Postgres (Aurora / Cloud SQL / managed PG) / SQL Server / MySQL; document/NoSQL — MongoDB / DynamoDB / Cosmos DB / Cassandra-ScyllaDB; key-value — Redis / DynamoDB; wide-column / time-series — Cassandra / Timescale / InfluxDB / ClickHouse; graph — Neo4j / Neptune. Geospatial → PostGIS. Vector → pgvector / dedicated (see AI row).
 - **Cache**: Redis / Memcached / in-memory
+
+> **DATABASE — POLYGLOT WHEN JUSTIFIED, NOT BY DEFAULT.** The store is
+> chosen per workload, and a project may need **one OR several** stores.
+> Pick the type that fits each access pattern: relational for
+> money/orders/anything needing ACID + JOINs; document/NoSQL for flexible
+> or high-write schemas (catalogue, profiles, event logs); key-value/cache
+> for sessions + hot data; time-series/wide-column for telemetry, IoT,
+> metrics, location history; search engine for full-text; graph for
+> relationship-heavy queries; vector for RAG/embeddings. When workloads
+> genuinely differ, propose **polyglot persistence** and add one §2 row
+> per store (e.g. "Database (system of record)", "Document store",
+> "Time-series store", "Search"), each with its own justification.
+> **But do NOT over-engineer:** a junior adds five datastores; a senior
+> adds only the ones a specific access pattern demands and explicitly
+> rejects the rest. If a single relational DB (optionally + Redis) covers
+> everything, say so and stop there. Each store added is operational cost
+> that must be defended against a §1b problem.
 - **Messaging**: Kafka (MSK / Confluent) / RabbitMQ / Azure Service Bus / SQS+SNS / Pub/Sub
 - **Search**: OpenSearch / Elasticsearch / Algolia / Postgres FTS
 - **Data pipeline (only if scope warrants)**: Airflow / Glue / Data Factory / Spark / dbt / Flink / NiFi
@@ -322,6 +385,34 @@ One paragraph: monolith / modular monolith / microservices / event-driven /
 serverless / hybrid. Justify the choice against scale, team size, and
 deployment constraints in the RFP. **Don't default to microservices** —
 it's almost always wrong for the timeline/team-size of an STS bid.
+
+> **SMART GROUNDING — never state a fact the inputs don't contain; infer it
+> intelligently and label it.** Team size, delivery timeline, budget and
+> existing-estate details are often ABSENT from the RFP. Do NOT write them
+> as if known (e.g. "at STS team/timeline", "the 18-dev team", "the 6-month
+> deadline") when no input says so — that is fabricated evidence and a
+> reviewer will catch it. Instead:
+> 1. **Drive the decision from GROUNDED signals that ARE in the inputs** —
+>    scope size (count of screens / modules / WBS leaf tasks), number of
+>    frontend targets, the domain + its NFR profile, bounded-context count,
+>    which paths need independent scaling, compliance gates. These alone
+>    are usually enough to choose monolith vs modular-monolith vs services.
+> 2. **Where a missing fact would change the decision, infer a reasoned
+>    working assumption from the grounded signals** — e.g. "scope ≈ 100+
+>    leaf tasks across 4 frontend targets + a real-time dispatch core ⇒
+>    a medium multi-squad team over a multi-quarter delivery is the
+>    realistic shape" — and **label it explicitly as an assumption**, not a
+>    fact. Phrase as "assuming a medium team / multi-quarter timeline,
+>    typical for a platform of this scope" — never as a stated client fact.
+> 3. **Surface every such assumption in §6 Risks/Assumptions** for the
+>    client to confirm, and note that the recommendation holds across the
+>    plausible range (e.g. "modular-monolith-core holds whether the team is
+>    8 or 20; only a >40-dev, many-team org would push toward full
+>    microservices").
+>
+> The same rule applies everywhere in the brief: cloud, CI tool, existing
+> estate, budget. If the input is silent, either derive from grounded
+> signals or mark it a labelled assumption — do not invent specifics.
 
 **Decision framework** (apply in order, stop at first clear hit):
 
