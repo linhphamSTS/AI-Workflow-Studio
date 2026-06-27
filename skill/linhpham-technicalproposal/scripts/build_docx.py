@@ -1310,6 +1310,34 @@ def _collect_subheadings(diagrams: list, existing_anchor_text: str = "") -> list
     return out
 
 
+def apply_keep_with_next(doc) -> int:
+    """Prevent the #1 cause of ugly whitespace / unnecessary page breaks: a
+    heading (or a diagram intro / image) stranded at the bottom of a page while
+    its content flows to the next. Word's keep-with-next pulls a heading down
+    to start on the same page as the block it introduces, and keep-together
+    stops a paragraph splitting across pages. Applied to every heading, every
+    image paragraph, and the diagram intro paragraph. Durable style rule — runs
+    on every build so no project regresses.
+    """
+    touched = 0
+    paras = doc.paragraphs
+    for idx, p in enumerate(paras):
+        sname = p.style.name if p.style else ""
+        is_heading = sname.startswith("Heading")
+        has_image = bool(p._p.findall(".//" + qn("w:drawing")))
+        if is_heading:
+            pf = p.paragraph_format
+            pf.keep_with_next = True
+            pf.keep_together = True
+            touched += 1
+        elif has_image:
+            # image should stay with the caption/bullets that follow it
+            p.paragraph_format.keep_with_next = True
+            p.paragraph_format.keep_together = True
+            touched += 1
+    return touched
+
+
 def build(template: Path, replacements: dict, diagrams: list, out: Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(template, out)
@@ -1395,6 +1423,12 @@ def build(template: Path, replacements: dict, diagrams: list, out: Path) -> None
     # 6b. Bump heading space-before/after so section transitions are visible.
     n_sp = boost_heading_spacing(doc)
     print(f"Heading spacing boosted: {n_sp}")
+
+    # 6b-ii. Keep headings/images with the block they introduce — stops a
+    #        heading orphaned at page bottom (the main "nhảy trang / khoảng
+    #        trống không đáng" cause).
+    n_kwn = apply_keep_with_next(doc)
+    print(f"Keep-with-next applied: {n_kwn}")
 
     # 6c. Every Figure caption table needs whitespace after it — body text
     #     touching the caption is a layout defect the user has flagged.
