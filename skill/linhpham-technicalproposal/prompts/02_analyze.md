@@ -236,23 +236,35 @@ Examples of how the choice flows from context:
   `Rust` only for a hard perf/safety need. The options are not limited to
   these — pick what the **problem domain** warrants.
 
-> **IMPARTIALITY — choose on merit, never anchor on the vendor's comfort
-> language (MANDATORY).** Derive every stack choice from (1) the problem
-> domain + its hard NFRs, (2) what comparable at-scale products in this
-> domain actually use (Step 0b), and (3) explicit client constraints — **in
-> that order.** "The delivery team is X-strong" or "our shop usually uses X"
-> is a *secondary constraint to be flagged and costed*, NOT the primary
-> driver — do NOT silently default to the vendor's favourite language/cloud
-> and force the reader to push back. If the domain-right choice differs from
-> the team's comfort zone (e.g. a Grab-class real-time core is a Go/polyglot
-> domain, not a .NET one), **recommend the domain-right choice** and treat
-> team ramp-up / hiring as an honest risk + estimate impact in §6 — do not
-> bend the technical recommendation to avoid that conversation. A genuine
-> hard constraint (client mandates a stack, must integrate a Microsoft
-> estate, regulator requires a vendor) DOES override — but then say so
-> explicitly and cite it; "we're comfortable with it" is not such a
-> constraint. Be impartial: the client is paying for the best-fit
-> architecture, not the bidder's convenience.
+> **IMPARTIALITY — choose purely on merit (MANDATORY).** Derive every stack
+> choice from (1) the problem domain + **the project's actual feature set**
+> + its hard NFRs, (2) what comparable at-scale products in this domain
+> actually use (Step 0b), and (3) explicit client constraints — **in that
+> order.** The technology must genuinely fit *these specific features*
+> (e.g. live GPS tracking + masked calling + tens of thousands of
+> persistent connections ⇒ a concurrency-first runtime), not just the
+> abstract domain label. Tie each choice back to the features in §1b that
+> demand it.
+> - **Staffing is NOT a selection factor.** "The delivery team is X-strong",
+>   "our shop usually uses X", or "we'd need to ramp up on Y" must NOT
+>   influence the pick and must NOT be raised as a risk — **recruiting the
+>   right people for the chosen stack is the HR/resourcing team's job.**
+>   Choose the best-fit technology and assume the right resources are
+>   sourced to it. Never bend the recommendation toward the bidder's comfort
+>   zone, and never hedge it with a "team ramp-up" caveat.
+> - **Evaluate the FULL realistic field, not a short list.** For backend
+>   language that means weighing, on merit, Go, JVM (Java/Kotlin), Node/TS,
+>   Python, Elixir/BEAM, Rust, .NET — and naming why each serious contender
+>   for THIS domain wins or loses (e.g. for a real-time dispatch core: Go
+>   for concurrency + tail latency + it's the de-facto language of the
+>   class; Elixir/BEAM a real contender for the connection-fan-out tier;
+>   JVM for heavy stream processing; .NET/Node/Python/Rust each with their
+>   own fit or miss). Same breadth for cloud, datastore, messaging, etc.
+> - A genuine **hard constraint** (client mandates a stack, must integrate
+>   an existing estate, a regulator requires a vendor) DOES override — say
+>   so explicitly and cite it; "we're comfortable with it" is NOT such a
+>   constraint. Be impartial: the client pays for the best-fit architecture,
+>   not the bidder's convenience.
 
 > **VERSION CURRENCY (MANDATORY).** Never hardcode a framework/runtime
 > version from memory — training data goes stale. Always propose the
