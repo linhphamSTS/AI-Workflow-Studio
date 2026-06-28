@@ -33,8 +33,13 @@ SRC = Path("skill/linhpham-technicalproposal/templates/proposal_template.docx")
 
 XML_SUBS = [
     # Multi-word phrases first so substring replacements don't double-fire.
+    # The case study is a per-project fill-in -> placeholders, never a hardcoded
+    # engagement name (keeps the template general / vendor-neutral).
     ("comparable to the Tay Ho B2B Airline Portal.",
-     "comparable to FruPro, a multi-stakeholder B2B platform we delivered for a similar engagement."),
+     "comparable to {{CASE_STUDY_TITLE}}."),
+    ("FruPro, a multi-stakeholder B2B platform we delivered for a similar engagement",
+     "{{CASE_STUDY_TITLE}}"),
+    ("https://saigontechnology.com/case-studies/frupro", "{{CASE_STUDY_URL}}"),
     ("B2B Airline Portal Platform", "{{PROJECT_TITLE}}"),
     ("sponsor@tayho.vn", "{{CLIENT_CONTACT_EMAIL}}"),
     ("Tay Ho Group", "{{CLIENT_NAME}}"),

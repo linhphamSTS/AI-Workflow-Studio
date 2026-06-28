@@ -22,7 +22,7 @@ FORMAT_REVIEWER = REPO / "skill/linhpham-technicalproposal/scripts/format_review
 CUSTOMER_PATTERNS = [
     "Tay Ho", "TayHo", "tayho", "GSA", "Scoot", "Batik",
     "LionAir", "Lion Air", "Beibu", "West Air", "Vendor Y",
-    "B2B Airline", "sponsor@", "@tayho", "Livaro",
+    "B2B Airline", "sponsor@", "@tayho", "Livaro", "FruPro", "frupro",
 ]
 GHOST_SYMBOLS = [
     "TAYHO_FORBIDDEN", "fix_tayho_leakage", "check_no_tayho_leakage",
@@ -122,7 +122,8 @@ def smoke_test() -> bool:
         "techstack_data": None,
         "techstack_ai": None,
         "mobile_app_strategy": None,
-        "case_study_title": "FruPro B2B platform delivery",
+        "case_study_title": "a comparable multi-stakeholder B2B platform delivery",
+        "case_study_url": "https://example.com/case-studies/sample",
         "summary_body": "Final summary paragraphs tailored to ACME's loyalty rebuild.",
     }
     diagrams = [

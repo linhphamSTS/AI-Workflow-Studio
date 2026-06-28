@@ -16,6 +16,10 @@ later edits — no Python knowledge required.
 from __future__ import annotations
 
 import html
+import json
+import platform
+import shutil
+import subprocess
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -233,6 +237,7 @@ def export_drawio(
     clusters: list[dict] | None = None,
     out_path: str | Path = "diagram.drawio",
     title: str = "Diagram",
+    direction: str = "TB",
 ) -> Path:
     """Write a draw.io XML file representing the diagram.
 
@@ -248,6 +253,15 @@ def export_drawio(
     """
     out_path = Path(out_path)
     clusters = clusters or []
+
+    # Preferred path: lay the diagram out with Graphviz (the SAME engine family
+    # that renders the PNG) so the .drawio MATCHES the PNG's structure, flow
+    # direction and grouping — instead of the old naive 5-per-row grid that
+    # "didn't look like the image". Falls back to the grid only when `dot` is
+    # unavailable (e.g. an air-gapped machine with no Graphviz).
+    _layout = _graphviz_layout(nodes, edges, clusters, direction)
+    if _layout is not None:
+        return _emit_from_layout(nodes, edges, clusters, _layout, out_path, title)
 
     # Auto-layout: if any node has no x/y, lay nodes out left-to-right.
     if any("x" not in n or "y" not in n for n in nodes):
@@ -334,6 +348,258 @@ def export_drawio(
         f'    </mxGraphModel>\n'
         f'  </diagram>\n'
         f'</mxfile>\n'
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(xml, encoding="utf-8")
+    return out_path
+
+
+# ---------------------------------------------------------------------------
+# Graphviz-driven layout — makes the .drawio MATCH the PNG.
+# ---------------------------------------------------------------------------
+
+def _attr(text: str) -> str:
+    """XML-escape a label for an mxCell `value` attribute AND preserve line
+    breaks. A literal newline inside an XML attribute is normalised to a space
+    by every XML parser (incl. draw.io), which would collapse a wrapped label
+    back onto one line — so encode "\\n" as the numeric char ref draw.io renders
+    as a line break."""
+    return escape(text or "").replace("\n", "&#10;")
+
+
+def _find_dot_local() -> str | None:
+    """Locate the Graphviz `dot` binary (PATH first, then the portable build
+    the diagram runtime downloads to ~/graphviz_portable)."""
+    binname = "dot.exe" if platform.system() == "Windows" else "dot"
+    found = shutil.which(binname)
+    if found:
+        return found
+    root = Path.home() / "graphviz_portable"
+    if root.exists():
+        cands = sorted(root.glob(f"Graphviz-*/bin/{binname}"))
+        if cands:
+            return str(cands[-1])
+    return None
+
+
+def _node_size_in(node: dict) -> tuple[float, float]:
+    """Approximate the on-canvas cell size (inches) of a node so Graphviz
+    reserves the right spacing — icon glyph on top + wrapped label below."""
+    label = node.get("label", "") or ""
+    lines = label.split("\n")
+    longest = max((len(ln) for ln in lines), default=0)
+    w_in = max(1.05, 0.085 * longest + 0.35)   # icon width + widest label line
+    h_in = 0.85 + 0.20 * max(0, len(lines) - 1)  # glyph + extra label rows
+    return round(w_in, 3), round(h_in, 3)
+
+
+def _gv_quote(s: str) -> str:
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _graphviz_layout(nodes, edges, clusters, direction):
+    """Run `dot -Tjson` on a graph built from the same nodes/edges/clusters and
+    return parsed geometry, or None if Graphviz is unavailable.
+
+    Returns: {"H": graph_height_pt, "nodes": {id: (cx,cy,w_pt,h_pt)},
+              "clusters": {cluster_id: (x0,y0,x1,y1)}}  — all in Graphviz points.
+    """
+    dot = _find_dot_local()
+    if not dot:
+        return None
+    direction = direction if direction in ("TB", "LR", "BT", "RL") else "TB"
+    cluster_idx = {c["id"]: i for i, c in enumerate(clusters)}
+    cluster_by_id = {c["id"]: c for c in clusters}
+    node_by_id = {n["id"]: n for n in nodes}
+    member_of = {}
+    for c in clusters:
+        for m in c.get("members", []):
+            member_of[m] = c["id"]
+    # Cluster HIERARCHY: a cluster may carry "parent": <cluster id> to nest
+    # inside another (VPC -> subnet -> pool). This is what makes the .drawio
+    # show real trust-boundary nesting like the SA-grade PNG.
+    children = {c["id"]: [] for c in clusters}
+    roots = []
+    for c in clusters:
+        p = c.get("parent")
+        if p and p in cluster_by_id:
+            children[p].append(c["id"])
+        else:
+            roots.append(c["id"])
+
+    def has_nodes(cid):
+        c = cluster_by_id[cid]
+        if any(m in node_by_id for m in c.get("members", [])):
+            return True
+        return any(has_nodes(ch) for ch in children.get(cid, []))
+
+    src = ["digraph G {",
+           f'  rankdir={direction}; compound=true; splines=ortho;',
+           '  nodesep=0.55; ranksep=0.85; pad=0.3;',
+           '  node [shape=box, fixedsize=true];']
+
+    def emit_node(nid, node, indent):
+        w, h = _node_size_in(node)
+        lbl = (node.get("label", "") or "").replace("\n", "\\n")
+        src.append(f'{indent}{_gv_quote(nid)} [width={w}, height={h}, '
+                   f'label={_gv_quote(lbl)}];')
+
+    def emit_cluster(cid, indent):
+        if not has_nodes(cid):
+            return  # Graphviz won't lay out an empty cluster
+        c = cluster_by_id[cid]
+        clbl = (c.get("label", "") or "").replace("\n", "\\n")
+        src.append(f'{indent}subgraph cluster_{cluster_idx[cid]} {{')
+        src.append(f'{indent}  label={_gv_quote(clbl)}; labelloc=t; fontsize=13; margin=12;')
+        for mid in c.get("members", []):
+            if mid in node_by_id:
+                emit_node(mid, node_by_id[mid], indent + "  ")
+        for ch in children.get(cid, []):
+            emit_cluster(ch, indent + "  ")
+        src.append(f'{indent}}}')
+
+    for cid in roots:
+        emit_cluster(cid, "  ")
+    for n in nodes:
+        if n["id"] not in member_of:
+            emit_node(n["id"], n, "  ")
+    for e in edges:
+        if e["from"] in node_by_id and e["to"] in node_by_id:
+            src.append(f'  {_gv_quote(e["from"])} -> {_gv_quote(e["to"])};')
+    src.append("}")
+    source = "\n".join(src)
+
+    try:
+        res = subprocess.run([dot, "-Tjson"], input=source,
+                             capture_output=True, text=True, timeout=60)
+    except Exception:
+        return None
+    if res.returncode != 0:
+        return None
+    try:
+        data = json.loads(res.stdout)
+    except json.JSONDecodeError:
+        return None
+
+    bb = data.get("bb", "")
+    try:
+        H = float(bb.split(",")[3])
+    except (IndexError, ValueError):
+        return None
+    idx_to_cid = {i: cid for cid, i in cluster_idx.items()}
+    node_geo, cluster_geo = {}, {}
+    for o in data.get("objects", []):
+        name = o.get("name", "")
+        if name.startswith("cluster_") and "bb" in o:
+            try:
+                i = int(name.split("_", 1)[1])
+            except ValueError:
+                continue
+            cid = idx_to_cid.get(i)
+            if cid is not None:
+                x0, y0, x1, y1 = (float(v) for v in o["bb"].split(","))
+                cluster_geo[cid] = (x0, y0, x1, y1)
+        elif "pos" in o:
+            cx, cy = (float(v) for v in o["pos"].split(","))
+            w = float(o.get("width", 1.0)) * 72.0
+            h = float(o.get("height", 1.0)) * 72.0
+            node_geo[name] = (cx, cy, w, h)
+    if not node_geo:
+        return None
+    return {"H": H, "nodes": node_geo, "clusters": cluster_geo}
+
+
+def _emit_from_layout(nodes, edges, clusters, layout, out_path, title) -> Path:
+    """Build the .drawio XML from Graphviz geometry (Y-flipped to draw.io's
+    top-left origin). Clusters are background rounded rectangles; nodes carry
+    native vendor stencils; edges use orthogonal routing."""
+    H = layout["H"]
+    ng = layout["nodes"]
+    cg = layout["clusters"]
+    M = 24.0  # outer margin so nothing kisses the page edge
+
+    def fy(y_pt: float) -> float:
+        return (H - y_pt) + M  # flip + margin
+
+    cells = []
+    cid_num = 2
+    # Clusters first (drawn behind nodes); not draw.io containers so the nodes
+    # on top stay individually selectable. OUTER (larger-area) clusters are
+    # emitted first so a nested VPC->subnet->pool hierarchy stacks correctly
+    # (inner boxes paint on top of their parent).
+    drawn = [c for c in clusters if c["id"] in cg]
+    drawn.sort(key=lambda c: (cg[c["id"]][2] - cg[c["id"]][0]) * (cg[c["id"]][3] - cg[c["id"]][1]),
+               reverse=True)
+    for c in drawn:
+        geo = cg.get(c["id"])
+        if not geo:
+            continue
+        x0, y0, x1, y1 = geo
+        x = x0 + M
+        y = fy(y1)
+        w = max(40.0, x1 - x0)
+        h = max(40.0, y1 - y0)
+        cells.append(
+            f'<mxCell id="{cid_num}" value="{_attr(c.get("label",""))}" '
+            f'style="{CLUSTER_STYLE}" vertex="1" parent="1">'
+            f'<mxGeometry x="{int(x)}" y="{int(y)}" '
+            f'width="{int(w)}" height="{int(h)}" as="geometry"/></mxCell>'
+        )
+        cid_num += 1
+
+    node_cell = {}
+    for n in nodes:
+        geo = ng.get(n["id"])
+        if not geo:
+            continue
+        cx, cy, w, h = geo
+        w = max(78.0, w)
+        h = max(78.0, h)
+        x = cx - w / 2 + M
+        y = fy(cy) - h / 2
+        shape_hint = n.get("shape")
+        style = _node_style(shape_hint)
+        _validate_style(style, shape_hint)
+        cells.append(
+            f'<mxCell id="{cid_num}" value="{_attr(n.get("label",""))}" '
+            f'style="{style}" vertex="1" parent="1">'
+            f'<mxGeometry x="{int(x)}" y="{int(y)}" '
+            f'width="{int(w)}" height="{int(h)}" as="geometry"/></mxCell>'
+        )
+        node_cell[n["id"]] = cid_num
+        cid_num += 1
+
+    for e in edges:
+        src = node_cell.get(e["from"])
+        dst = node_cell.get(e["to"])
+        if src is None or dst is None:
+            continue
+        style = EDGE_STYLE_DASHED if e.get("dashed") else EDGE_STYLE
+        cells.append(
+            f'<mxCell id="{cid_num}" value="{_attr(e.get("label",""))}" '
+            f'style="{style}" edge="1" parent="1" source="{src}" target="{dst}">'
+            f'<mxGeometry relative="1" as="geometry"/></mxCell>'
+        )
+        cid_num += 1
+
+    page_w = int(max(x1 for x0, y0, x1, y1 in cg.values()) + 2 * M) if cg else int(
+        max((cx + w) for cx, cy, w, h in ng.values()) + 2 * M)
+    page_h = int(H + 2 * M)
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<mxfile host="app.diagrams.net" version="24.0">\n'
+        f'  <diagram name="{escape(title)}" id="diagram-1">\n'
+        f'    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" '
+        f'tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" '
+        f'pageWidth="{page_w}" pageHeight="{page_h}" math="0" shadow="0">\n'
+        '      <root>\n'
+        '        <mxCell id="0"/>\n'
+        '        <mxCell id="1" parent="0"/>\n'
+        + "\n".join("        " + c for c in cells) + "\n"
+        '      </root>\n'
+        '    </mxGraphModel>\n'
+        '  </diagram>\n'
+        '</mxfile>\n'
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(xml, encoding="utf-8")

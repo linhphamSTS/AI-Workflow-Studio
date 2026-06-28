@@ -203,10 +203,35 @@ def fix_heading_deeper_than_body(docx_path: Path) -> int:
 
 
 def fix_heading_section_spacing(docx_path: Path) -> int:
-    """Raise heading space-before/after to the documented floors."""
-    floors_before = {1: 24, 2: 24, 3: 24, 4: 18, 5: 18, 6: 12}
-    floors_after  = {1: 12, 2: 12, 3: 12, 4:  8, 5:  8, 6:  6}
+    """Raise heading space-before/after to the documented floors (kept in sync
+    with build_docx `_HEADING_MIN_*`). A heading stacked directly under another
+    heading is skipped — its small space-before is intentional (no blank-line
+    gap between "1." and "1.1")."""
+    floors_before = {1: 18, 2: 12, 3: 10, 4: 8, 5: 8, 6: 6}
+    floors_after  = {1:  6, 2:  4, 3:  4, 4: 3, 5: 3, 6: 3}
     doc = Document(str(docx_path))
+    heading_ids = {s.style_id for s in doc.styles
+                   if getattr(s, "style_id", None) and (s.name or "").startswith("Heading")}
+
+    def prev_is_heading(p_el):
+        def is_h(style):
+            return style in heading_ids or style.startswith("Heading")
+        prev = p_el.getprevious()
+        while prev is not None:
+            if prev.tag != qn("w:p"):
+                return False
+            pPr = prev.find(qn("w:pPr"))
+            style = ""
+            if pPr is not None:
+                ps = pPr.find(qn("w:pStyle"))
+                if ps is not None:
+                    style = ps.get(qn("w:val")) or ""
+            text = "".join(t.text or "" for t in prev.iter(qn("w:t")))
+            if not text.strip() and not is_h(style):
+                prev = prev.getprevious()
+                continue
+            return is_h(style)
+        return False
     count = 0
     for p in doc.paragraphs:
         sname = p.style.name if p.style else ""
@@ -221,12 +246,13 @@ def fix_heading_section_spacing(docx_path: Path) -> int:
         if sb_floor is None:
             continue
         pf = p.paragraph_format
-        cur_sb = pf.space_before.pt if pf.space_before else 0
-        cur_sa = pf.space_after.pt if pf.space_after else 0
         changed = False
-        if cur_sb + 0.5 < sb_floor:
-            pf.space_before = Pt(sb_floor)
-            changed = True
+        if not prev_is_heading(p._p):
+            cur_sb = pf.space_before.pt if pf.space_before else 0
+            if cur_sb + 0.5 < sb_floor:
+                pf.space_before = Pt(sb_floor)
+                changed = True
+        cur_sa = pf.space_after.pt if pf.space_after else 0
         if cur_sa + 0.5 < sa_floor:
             pf.space_after = Pt(sa_floor)
             changed = True

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Fetch language / framework / tool logos and rasterise them to PNG for the
-// tech-stack tables (the Tay Ho reference shows a logo on every row).
+// tech-stack tables (every row shows a logo).
 //
 // Source: devicon (MIT) + simpleicons (CC0). Rasteriser: @resvg/resvg-js
 // (Rust resvg — NO native system libs, works on Windows where cairosvg fails).

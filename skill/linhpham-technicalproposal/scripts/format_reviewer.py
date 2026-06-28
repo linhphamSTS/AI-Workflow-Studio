@@ -312,13 +312,44 @@ def check_heading_indent_vs_body(docx_path: Path, report: Report) -> None:
         report.pass_("heading_indent_consistent")
 
 
+def _prev_block_is_heading_el(p_el, heading_ids) -> bool:
+    """True if the block before `p_el` is a heading paragraph (skipping empty
+    spacers). A heading stacked directly under another heading hugs it with a
+    small space-before on purpose — it must NOT be flagged as 'tight'.
+    `heading_ids` maps numeric style IDs (the template uses `w:val="4"`) to
+    headings — a name-only `startswith("Heading")` check silently misses them."""
+    from docx.oxml.ns import qn as _qn
+    def is_h(style):
+        return style in heading_ids or style.startswith("Heading")
+    prev = p_el.getprevious()
+    while prev is not None:
+        if prev.tag != _qn("w:p"):
+            return False
+        pPr = prev.find(_qn("w:pPr"))
+        style = ""
+        if pPr is not None:
+            ps = pPr.find(_qn("w:pStyle"))
+            if ps is not None:
+                style = ps.get(_qn("w:val")) or ""
+        text = "".join(t.text or "" for t in prev.iter(_qn("w:t")))
+        if not text.strip() and not is_h(style):
+            prev = prev.getprevious()
+            continue
+        return is_h(style)
+    return False
+
+
 def check_heading_section_spacing(docx_path: Path, report: Report) -> None:
     """Heading 1-3 should have visible space-before so major section
-    transitions don't feel cramped. Floors picked to match build_docx
-    `_HEADING_MIN_SPACE_BEFORE`: H1/H2/H3 >= 24pt, H4/H5 >= 18pt, H6 >= 12pt.
+    transitions don't feel cramped — but NOT a blank-line gap. Floors match
+    build_docx `_HEADING_MIN_SPACE_BEFORE`: H1 >= 18, H2 >= 12, H3 >= 10,
+    H4/H5 >= 8, H6 >= 6pt. A heading stacked directly under another heading is
+    exempt (it hugs its parent with a small gap on purpose).
     """
-    floors = {1: 24, 2: 24, 3: 24, 4: 18, 5: 18, 6: 12}
+    floors = {1: 18, 2: 12, 3: 10, 4: 8, 5: 8, 6: 6}
     doc = Document(str(docx_path))
+    heading_ids = {s.style_id for s in doc.styles
+                   if getattr(s, "style_id", None) and (s.name or "").startswith("Heading")}
     bad = []
     for i, p in enumerate(doc.paragraphs):
         sname = p.style.name if p.style else ""
@@ -331,6 +362,8 @@ def check_heading_section_spacing(docx_path: Path, report: Report) -> None:
         floor = floors.get(lvl)
         if floor is None:
             continue
+        if _prev_block_is_heading_el(p._p, heading_ids):
+            continue  # stacked heading — small gap is intentional
         pf = p.paragraph_format
         sb = pf.space_before.pt if pf.space_before else 0
         if sb + 0.5 < floor:  # 0.5pt rounding slack
@@ -469,8 +502,8 @@ _TECHSTACK_LABELS = {
 def check_techstack_is_table(docx_path: Path, report: Report) -> None:
     """Each Technology Stack sub-heading (Back-end / Front-end / Database /
     Server & Hosting / Data / AI) MUST be immediately followed by a 2-column
-    'Technology | Advantages' table, NOT a prose paragraph — the Tay Ho
-    reference format. Prose here is a zero-tolerance format defect
+    'Technology | Advantages' table, NOT a prose paragraph — the required
+    professional table format. Prose here is a zero-tolerance format defect
     (`techstack_not_table`): the content-writer emitted a string instead of the
     required array of {name, description} rows."""
     doc = Document(str(docx_path))
@@ -501,11 +534,52 @@ def check_techstack_is_table(docx_path: Path, report: Report) -> None:
         report.add(Issue(
             "techstack_not_table", "visual", "blocker", False,
             f"{len(bad)} Technology Stack sub-section(s) render as prose instead of a "
-            f"'Technology | Advantages' table (Tay Ho format)",
+            f"'Technology | Advantages' table",
             detail="; ".join(f"'{h}' -> {prev}" for h, prev in bad),
         ))
     else:
         report.pass_("techstack_is_table")
+
+
+def check_em_dash_in_prose(docx_path: Path, report: Report) -> None:
+    """The user rejects em-dashes (—) in BODY PROSE as "looks AI". They are
+    allowed ONLY in Problems & Solutions and figure explanation bullets (which
+    render as "●" bullets). Flag any non-bullet, non-heading paragraph — incl.
+    tech-stack table cells — that contains an em-dash, so the rule in
+    04_generate.md is actually enforced, not just documented."""
+    doc = Document(str(docx_path))
+    bad = []
+
+    def scan(paras):
+        for p in paras:
+            sname = p.style.name if p.style else ""
+            if sname.startswith("Heading"):
+                continue
+            txt = (p.text or "").strip()
+            if not txt or txt[0] in "●•-":  # bullets allow em-dashes
+                continue
+            # Figure/table captions use the documented "<Type> — <Scope>" format.
+            if sname == "Caption" or txt.startswith(("Figure", "Bảng", "Table ")):
+                continue
+            if "—" in txt:
+                bad.append(txt[:60])
+
+    scan(doc.paragraphs)
+    for t in doc.tables:
+        for row in t.rows:
+            for cell in row.cells:
+                scan(cell.paragraphs)
+
+    if bad:
+        report.add(Issue(
+            "em_dash_in_prose", "content", "major", False,
+            f"{len(bad)} body-prose paragraph(s) use an em-dash (—); the user rejects these as "
+            f"'looks AI'. Use commas, colons, parentheses or split the sentence. (Em-dashes are "
+            f"allowed only in Problems & Solutions and figure explanation bullets.)",
+            detail="; ".join(bad[:5]),
+        ))
+    else:
+        report.pass_("em_dash_prose_ok")
 
 
 # ---------------------------------------------------------------------------
@@ -533,6 +607,7 @@ CHECKS = [
     ("settings_flags_present",         check_settings_flags_present),
     ("justify_whitespace_channels",    check_justify_whitespace_channels),
     ("techstack_is_table",             check_techstack_is_table),
+    ("em_dash_in_prose",               check_em_dash_in_prose),
 ]
 
 

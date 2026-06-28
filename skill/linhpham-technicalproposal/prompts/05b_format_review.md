@@ -140,7 +140,7 @@ NOT report PASS** until `bullet_number_duplicate`, `image_text_crush`,
 - [ ] **Every Technology Stack sub-section (Back-end / Front-end / Database /
       Server & Hosting / Data / AI) renders as a 2-column `Technology |
       Advantages` table, not a prose paragraph** (`techstack_not_table`). This
-      matches the Tay Ho reference format. It is NOT auto-fixable — it means the
+      is the required professional table format. It is NOT auto-fixable — it means the
       content-writer emitted a prose string instead of the required array of
       `{name, description}` rows; the fix is to regenerate that techstack value
       as an array and rebuild. Escalate if it survives.

@@ -662,29 +662,106 @@ def drop_section_if_empty(doc, heading_text: str, mapping: dict, content_key: st
     return True
 
 
-# Visual hierarchy: bigger gap before a heading than after it, so the
-# heading reads as introducing the block that follows rather than floating
-# loose between two equal whitespace gulfs. Values are in points and are
-# floors — if the template already has more, we leave it alone.
-# Floors MUST match the strict reviewer's heading_section_spacing_tight floors
-# (H1-H3 >= 24pt, H4-H5 >= 18pt, H6 >= 12pt space-before) so that re-running
-# build_docx after auto_fix does NOT clamp headings back below the reviewer
-# floor and re-introduce the defect. Kept in sync with format_reviewer.py.
-_HEADING_MIN_SPACE_BEFORE = {1: 24, 2: 24, 3: 24, 4: 18, 5: 18, 6: 12}
-_HEADING_MIN_SPACE_AFTER  = {1:  6, 2:  6, 3:  6, 4:  5, 5:  5, 6:  4}
-# Hard CEILING — keeps section transitions visible without going loose; must
-# sit ABOVE the reviewer floors above so the ceiling never clamps below them.
-_HEADING_MAX_SPACE_BEFORE = {1: 36, 2: 36, 3: 36, 4: 28, 5: 28, 6: 20}
-_HEADING_MAX_SPACE_AFTER  = {1: 14, 2: 14, 3: 14, 4: 12, 5: 12, 6: 10}
+# Professional, Word-standard heading spacing (points). The heading hugs the
+# block it introduces (SMALL space-after) and is separated from the content
+# ABOVE by space-before. Values are clamped into [floor, ceiling] — far tighter
+# than the old 24pt floor, which made "1." and "1.1" sit a full blank line apart
+# (the defect the user flagged). Floors MUST match the reviewer's
+# heading_section_spacing floors so a post-auto_fix rebuild can't regress.
+_HEADING_MIN_SPACE_BEFORE = {1: 18, 2: 12, 3: 10, 4: 8, 5: 8, 6: 6}
+_HEADING_MIN_SPACE_AFTER  = {1:  6, 2:  4, 3:  4, 4:  3, 5:  3, 6:  3}
+_HEADING_MAX_SPACE_BEFORE = {1: 24, 2: 16, 3: 12, 4: 10, 5: 10, 6: 8}
+_HEADING_MAX_SPACE_AFTER  = {1: 10, 2:  8, 3:  6, 4:  6, 5:  6, 6:  6}
+# A heading IMMEDIATELY under another heading (e.g. "1. INTRODUCTION" then
+# "1.1 Executive Summary") must NOT add a section-size gap — the two group as a
+# unit. Force a small space-before in that case regardless of the floor.
+_HEADING_STACKED_SPACE_BEFORE = {1: 6, 2: 4, 3: 4, 4: 4, 5: 4, 6: 4}
+
+
+def _heading_style_ids(doc) -> set:
+    """Style IDs whose name is a Heading. The template references styles by
+    numeric ID (`w:pStyle w:val="4"`) in the XML, while python-docx exposes the
+    resolved name ("Heading 3"); raw-XML checks must map ID -> name or they
+    silently miss every heading."""
+    ids = set()
+    for s in doc.styles:
+        try:
+            if s.style_id and (s.name or "").startswith("Heading"):
+                ids.add(s.style_id)
+        except Exception:
+            continue
+    return ids
+
+
+def _pstyle_val(p_el) -> str:
+    pPr = p_el.find(qn("w:pPr"))
+    if pPr is None:
+        return ""
+    ps = pPr.find(qn("w:pStyle"))
+    return (ps.get(qn("w:val")) if ps is not None else "") or ""
+
+
+def _el_is_heading(p_el, heading_ids: set) -> bool:
+    if p_el is None or p_el.tag != qn("w:p"):
+        return False
+    val = _pstyle_val(p_el)
+    return val in heading_ids or val.startswith("Heading")
+
+
+def _prev_block_is_heading(p_el, heading_ids: set) -> bool:
+    """True if the block immediately before `p_el` is a heading paragraph
+    (skipping empty spacer paragraphs). Used so a heading stacked directly under
+    another heading hugs it instead of leaving a blank-line gap."""
+    prev = p_el.getprevious()
+    while prev is not None:
+        if prev.tag != qn("w:p"):
+            return False  # a table or other block — not a stacked heading
+        text = "".join(t.text or "" for t in prev.iter(qn("w:t")))
+        if not text.strip() and not _el_is_heading(prev, heading_ids):
+            prev = prev.getprevious()  # skip an empty spacer paragraph
+            continue
+        return _el_is_heading(prev, heading_ids)
+    return False
+
+
+def remove_heading_adjacent_blank_paragraphs(doc) -> int:
+    """Delete empty 'spacer' paragraphs that sit directly next to a heading.
+
+    The template peppers blank paragraphs around headings; combined with the
+    headings' own space-before/after they read as an extra blank line ("dư 1
+    dòng trắng" — e.g. between "1. INTRODUCTION" and "1.1 Executive Summary").
+    Heading space-before/after alone gives the correct, consistent rhythm, so
+    these spacers are pure noise. Keeps image paragraphs and the section-final
+    paragraph."""
+    heading_ids = _heading_style_ids(doc)
+    body = doc.element.body
+    removed = 0
+    for el in list(body):
+        if el.tag != qn("w:p"):
+            continue
+        if "".join(t.text or "" for t in el.iter(qn("w:t"))).strip():
+            continue
+        if el.find(".//" + qn("w:drawing")) is not None:
+            continue  # holds an image — not a blank spacer
+        pPr = el.find(qn("w:pPr"))
+        if pPr is not None and pPr.find(qn("w:sectPr")) is not None:
+            continue  # section-carrying paragraph — keep
+        if _el_is_heading(el.getprevious(), heading_ids) or _el_is_heading(el.getnext(), heading_ids):
+            body.remove(el)
+            removed += 1
+    return removed
 
 
 def boost_heading_spacing(doc) -> int:
-    """Raise heading space-before / space-after to the floors above. Without
-    this Heading 5/6 sit too close to their preceding paragraph and the
-    document reads as a wall of text — a quality issue the user has
-    flagged. Floors only: any template value above the floor is preserved.
+    """Clamp heading space-before/after into the professional ranges above.
+
+    A heading directly under another heading gets a small forced space-before
+    (no blank-line gap between "1." and "1.1"); otherwise space-before is
+    clamped into [floor, ceiling]. space-after is always kept small so the
+    heading hugs the block it introduces.
     """
     touched = 0
+    heading_ids = _heading_style_ids(doc)
     for p in doc.paragraphs:
         sname = p.style.name if p.style else ""
         if not sname.startswith("Heading"):
@@ -700,22 +777,21 @@ def boost_heading_spacing(doc) -> int:
         if sb_floor is None:
             continue
         pf = p.paragraph_format
-        cur_sb = pf.space_before.pt if pf.space_before else 0
+        if _prev_block_is_heading(p._p, heading_ids):
+            # stacked heading — force the small "grouped" gap
+            pf.space_before = Pt(_HEADING_STACKED_SPACE_BEFORE.get(lvl, 4))
+            touched += 1
+        else:
+            cur_sb = pf.space_before.pt if pf.space_before else 0
+            if cur_sb < sb_floor:
+                pf.space_before = Pt(sb_floor); touched += 1
+            elif sb_ceil and cur_sb > sb_ceil:
+                pf.space_before = Pt(sb_ceil); touched += 1
         cur_sa = pf.space_after.pt if pf.space_after else 0
-        # Floor: too tight reads as wall of text
-        if cur_sb < sb_floor:
-            pf.space_before = Pt(sb_floor)
-            touched += 1
         if cur_sa < sa_floor:
-            pf.space_after = Pt(sa_floor)
-            touched += 1
-        # Ceiling: too loose reads as orphan headings with hollow gaps
-        if sb_ceil and cur_sb > sb_ceil:
-            pf.space_before = Pt(sb_ceil)
-            touched += 1
-        if sa_ceil and cur_sa > sa_ceil:
-            pf.space_after = Pt(sa_ceil)
-            touched += 1
+            pf.space_after = Pt(sa_floor); touched += 1
+        elif sa_ceil and cur_sa > sa_ceil:
+            pf.space_after = Pt(sa_ceil); touched += 1
     return touched
 
 
@@ -1069,7 +1145,7 @@ def _set_table_borders(table, color: str = "B7B7B7", size: int = 8) -> None:
 
 
 def _build_techstack_table(doc, items: list[dict], header_fill: str = "595959"):
-    """Build a 2-col 'Technology | Advantages' table styled like Tay Ho.
+    """Build a 2-col 'Technology | Advantages' table (professional shaded-header layout).
 
     Each item: {"name": str, "logo": "pack/name" | None, "description": str}.
     Logo (if resolvable) is embedded above the bold name in column 1.
@@ -1283,6 +1359,34 @@ def remove_empty_caption_tables(doc) -> int:
     return removed
 
 
+def remove_trailing_empty_paragraphs(doc) -> int:
+    """Delete empty paragraphs at the very END of the body so SharePoint / Word /
+    Office-365-online don't render a blank trailing page ("dư trang trắng").
+
+    Keeps the body's final `sectPr`, any paragraph that carries a section break
+    in its `pPr`, and any paragraph holding an image or an explicit break. Only
+    the trailing RUN of truly empty paragraphs is removed.
+    """
+    body = doc.element.body
+    removed = 0
+    for el in reversed(list(body)):
+        tag = el.tag
+        if tag == qn("w:sectPr"):
+            continue  # the document-final section properties — keep, keep scanning
+        if tag != qn("w:p"):
+            break  # a table or other content block — stop
+        text = "".join(t.text or "" for t in el.iter(qn("w:t")))
+        has_img = el.find(".//" + qn("w:drawing")) is not None
+        has_break = el.find(".//" + qn("w:br")) is not None
+        pPr = el.find(qn("w:pPr"))
+        holds_sectpr = pPr is not None and pPr.find(qn("w:sectPr")) is not None
+        if text.strip() or has_img or has_break or holds_sectpr:
+            break  # real content (or a section-carrying para) — stop here
+        body.remove(el)
+        removed += 1
+    return removed
+
+
 def _normalise_subheading(text: str) -> str:
     """Strip leading section numbers and normalise for comparison."""
     t = re.sub(r"^\s*\d+(\.\d+)*\s*[.:)-]?\s*", "", text or "")
@@ -1338,8 +1442,49 @@ def apply_keep_with_next(doc) -> int:
     return touched
 
 
+# Replacement keys consumed by dedicated logic rather than a {{KEY}} placeholder
+# in the template (so they are exempt from the missing-placeholder guard below).
+_NON_PLACEHOLDER_KEYS = {"diagram_captions"}
+
+
+def validate_template_placeholders(template: Path, replacements: dict) -> None:
+    """Fail loudly if a content key carries data but the template has no slot for it.
+
+    Root cause of the "Mobile App Strategy heading present but body empty" bug:
+    the template was missing the ``{{MOBILE_APP_STRATEGY}}`` placeholder, so the
+    non-null value in replacements.json had nowhere to render and the section
+    shipped empty (drop_section_if_empty also kept the heading because the data
+    was non-empty). A content key with data but no placeholder = guaranteed lost
+    content, so we stop the build instead of silently producing an empty section.
+    """
+    present: set[str] = set()
+    with zipfile.ZipFile(template) as zf:
+        for name in zf.namelist():
+            if name.startswith("word/") and name.endswith(".xml"):
+                xml = zf.read(name).decode("utf-8", "ignore")
+                present.update(re.findall(r"\{\{([A-Z0-9_]+)\}\}", xml))
+    missing = []
+    for key, val in replacements.items():
+        if key in _NON_PLACEHOLDER_KEYS:
+            continue
+        truthy = val not in (None, "", "null", [])
+        if truthy and key.upper() not in present:
+            missing.append(key)
+    if missing:
+        raise SystemExit(
+            "! Template is missing a placeholder for content key(s): "
+            + ", ".join(sorted(missing))
+            + ".\n  Each non-empty content key needs a matching {{KEY}} slot in "
+            "the template (e.g. mobile_app_strategy -> {{MOBILE_APP_STRATEGY}}).\n"
+            "  Add the placeholder paragraph under its heading, or set the value "
+            "to null if the section should be dropped."
+        )
+
+
 def build(template: Path, replacements: dict, diagrams: list, out: Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
+    # Guard: every non-empty content key must have a {{KEY}} slot in the template.
+    validate_template_placeholders(template, replacements)
     shutil.copyfile(template, out)
 
     doc = Document(str(out))
@@ -1420,6 +1565,12 @@ def build(template: Path, replacements: dict, diagrams: list, out: Path) -> None
     n_norm = normalize_heading_indents(doc)
     print(f"Heading indents normalized: {n_norm}")
 
+    # 6a-ii. Remove blank 'spacer' paragraphs adjacent to headings so the
+    #        headings' own space-before/after controls the rhythm — kills the
+    #        "dư 1 dòng trắng" gap between e.g. '1.' and '1.1'.
+    n_blank = remove_heading_adjacent_blank_paragraphs(doc)
+    print(f"Heading-adjacent blank paragraphs removed: {n_blank}")
+
     # 6b. Bump heading space-before/after so section transitions are visible.
     n_sp = boost_heading_spacing(doc)
     print(f"Heading spacing boosted: {n_sp}")
@@ -1447,6 +1598,12 @@ def build(template: Path, replacements: dict, diagrams: list, out: Path) -> None
     # 6f. Justify body.
     justified = justify_body(doc)
     print(f"Paragraphs justified: {justified}")
+
+    # 6g. Strip trailing empty paragraphs so no blank page renders at the end
+    #     (SharePoint / Office-365-online are strict about this).
+    n_tail = remove_trailing_empty_paragraphs(doc)
+    if n_tail:
+        print(f"Trailing empty paragraphs removed: {n_tail}")
 
     # 7. Save.
     doc.save(str(out))

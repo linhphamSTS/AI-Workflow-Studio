@@ -20,7 +20,7 @@ PROMPT = REPO / "skill/linhpham-technicalproposal/prompts/04_generate.md"
 
 PATTERNS = ["Tay Ho", "TayHo", "tayho", "GSA", "Scoot", "Batik",
             "LionAir", "Beibu", "West Air", "Vendor Y", "B2B Airline",
-            "sponsor@", "@tayho", "Livaro"]
+            "sponsor@", "@tayho", "Livaro", "FruPro", "frupro"]
 
 
 def section(t):
@@ -116,7 +116,8 @@ def main() -> int:
         "techstack_data": None,
         "techstack_ai": None,
         "mobile_app_strategy": None,
-        "case_study_title": "FruPro delivery",
+        "case_study_title": "a comparable B2B platform delivery",
+        "case_study_url": "https://example.com/case-studies/sample",
         "summary_body": "Project-specific summary text.",
     }
     diagrams = [

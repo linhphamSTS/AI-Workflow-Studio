@@ -20,12 +20,94 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
 import urllib.request
 import zipfile
 from pathlib import Path
+
+
+# ---------------------------------------------------------------------------
+# Label wrapping — the single canonical helper for EVERY node and cluster
+# label (and the drawio export). Use it instead of hand-inserting "\n".
+# ---------------------------------------------------------------------------
+
+def wrap_label(text: str, limit: int = 16, max_lines: int = 3) -> str:
+    """Wrap a diagram label into <= max_lines short lines without ugly breaks.
+
+    Fixes the defects seen in prior renders:
+      * NEVER orphans an opening parenthesis — "Amazon MSK (Kafka)" wraps to
+        "Amazon MSK" / "(Kafka)", never "Amazon MSK (" / "Kafka)".
+        (The old rule "break at '(' as a boundary" is what produced the
+        dangling "(" — we break BEFORE "(", keeping "(...)" together.)
+      * NEVER ends a line on a "/", "+", "-" or "(" connector.
+      * Keeps short slash groups ("10.0.0.0/16", "client/server") intact and
+        only splits them when a single token is itself longer than the limit.
+
+    Returns the text with embedded "\\n" line breaks. Graphviz and draw.io both
+    honour "\\n", and because the breaks are explicit neither engine re-wraps
+    (re-wrapping by pixel width is what orphaned the "(").
+    """
+    text = " ".join((text or "").split())  # normalise whitespace
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    # A break before "(" so the parenthetical starts a fresh line cleanly.
+    norm = re.sub(r"\s*\(", " (", text).strip()
+    # Protect a "(...)" group that fits on one line: keep it as a single token
+    # so it is never split mid-parenthetical ("(PG family)" stays whole).
+    NBSP = "\x00"
+    def _protect(m: "re.Match") -> str:
+        g = m.group(0)
+        return g.replace(" ", NBSP) if len(g) <= limit else g
+    norm = re.sub(r"\([^()]*\)", _protect, norm)
+    words = [w.replace(NBSP, " ") for w in norm.split(" ") if w]
+
+    def hard_split(tok: str) -> list[str]:
+        """Split a single over-long token at /, +, - (keeping the separator on
+        the left part) so we never emit a line wider than the cell."""
+        if len(tok) <= limit:
+            return [tok]
+        parts, buf = [], ""
+        for ch in tok:
+            buf += ch
+            if ch in "/+-" and len(buf) >= limit:
+                parts.append(buf)
+                buf = ""
+        if buf:
+            parts.append(buf)
+        return parts or [tok]
+
+    lines: list[str] = []
+    cur = ""
+    for w in words:
+        for piece in hard_split(w):
+            cand = (cur + " " + piece).strip()
+            if not cur or len(cand) <= limit:
+                cur = cand
+            else:
+                lines.append(cur)
+                cur = piece
+    if cur:
+        lines.append(cur)
+
+    # Collapse to max_lines by merging the overflow into the last allowed line.
+    if len(lines) > max_lines:
+        head = lines[: max_lines - 1]
+        head.append(" ".join(lines[max_lines - 1:]))
+        lines = head
+
+    # Safety net: a line must NEVER end on a lone opening "(" (the headline
+    # defect). Parenthetical protection above normally prevents this; this
+    # catches an unbalanced "(" with no closing ")".
+    for i in range(len(lines) - 1):
+        if lines[i].endswith("("):
+            lines[i] = lines[i][:-1].rstrip()
+            lines[i + 1] = "(" + lines[i + 1]
+    return "\n".join(ln for ln in lines if ln)
 
 
 GRAPHVIZ_PORTABLE_ROOT = Path.home() / "graphviz_portable"
@@ -52,6 +134,50 @@ def _ensure_diagrams_package() -> None:
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"pip install diagrams failed: {e}") from e
     import diagrams  # noqa: F401 — verify install worked
+
+
+def _icon_resources_present() -> bool:
+    """True if the `diagrams` package's bundled icon PNGs are on disk.
+
+    A pip wheel can install the `diagrams` *code* without its `resources/`
+    icon tree (seen in the wild), which makes every rendered node a blank box
+    with no vendor glyph. We detect that so bootstrap() can repair it."""
+    try:
+        import diagrams
+    except ImportError:
+        return False
+    # mingrammer resolves an icon as `<dir-of-diagrams-pkg>/../<_icon_dir>` where
+    # `_icon_dir` starts with "resources/", i.e. `site-packages/resources/...`.
+    # The wheel lays them at the site-packages root, NOT inside the package dir,
+    # so check the parent first (the location mingrammer actually reads).
+    base = Path(diagrams.__file__).parent
+    for res in (base.parent / "resources", base / "resources"):
+        if res.exists():
+            for _ in res.rglob("*.png"):  # returns on the first icon — fast
+                return True
+    return False
+
+
+def _ensure_icon_resources() -> None:
+    """Repair a `diagrams` install whose bundled icon `resources/` are missing
+    by force-reinstalling the package. Warns (does not hard-fail) if offline so
+    the run still produces diagrams — just without vendor glyphs."""
+    if _icon_resources_present():
+        return
+    print("[diagrams_runtime] `diagrams` icon resources MISSING — "
+          "force-reinstalling to restore bundled vendor icons...")
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--user",
+             "--force-reinstall", "--no-deps", "diagrams"],
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"[diagrams_runtime] ! reinstall failed: {e}", file=sys.stderr)
+    if not _icon_resources_present():
+        print("[diagrams_runtime] ! WARNING: diagrams icons still missing — PNG "
+              "nodes will render without vendor glyphs. Fix manually: "
+              "pip install --force-reinstall diagrams", file=sys.stderr)
 
 
 def _find_dot() -> Path | None:
@@ -109,6 +235,7 @@ def bootstrap() -> Path:
     """Ensure `diagrams` + Graphviz are ready. Returns the path to `dot`.
     Adds Graphviz `bin/` to PATH for the rest of this process."""
     _ensure_diagrams_package()
+    _ensure_icon_resources()
     dot = _find_dot()
     if dot is None:
         print("[diagrams_runtime] Graphviz `dot` not found — installing...")

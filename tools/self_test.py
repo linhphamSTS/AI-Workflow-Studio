@@ -136,7 +136,8 @@ def main() -> int:
         "techstack_data": None,           # no data pipeline in scope -> drop
         "techstack_ai": None,             # no AI in scope -> drop
         "mobile_app_strategy": None,      # web-only -> drop
-        "case_study_title": "FruPro multi-tenant B2B platform",
+        "case_study_title": "a comparable multi-tenant B2B platform",
+        "case_study_url": "https://example.com/case-studies/sample",
         "summary_body": (
             "Adopting AWS managed services for the loyalty platform is "
             "fundamentally an availability and throughput problem rather than "

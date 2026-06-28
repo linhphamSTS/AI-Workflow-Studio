@@ -400,24 +400,50 @@ Pick from the menus below:
      client already runs and wants kept? → use that (lift-and-shift
      beats re-platforming). E.g. "we already have a Jenkins shared
      library" → Jenkins.
-  2. Did the RFP / company_context name the **SCM platform**? →
+  2. **Does the client need CONTROL / data-sovereignty over the pipeline?**
+     Regulated, government, banking, defence, healthcare, "no third-party
+     SaaS", "must run in our VPC / on-prem", "secrets must not leave our
+     estate" — many enterprises reject cloud GitHub for exactly this reason
+     (they cannot control it). → choose a **self-hostable CI that runs
+     INSIDE the client's own estate / cloud account**: GitLab self-managed,
+     Jenkins, Azure DevOps Server, Bitbucket Data Center, or the
+     cloud-native pipeline that stays in their account (AWS CodePipeline,
+     Azure DevOps, GCP Cloud Build). AVOID multi-tenant SaaS CI (cloud
+     GitHub Actions, GitLab.com, CircleCI) where builds and secrets leave
+     their control. (Cloud GitHub Actions qualifies ONLY with self-hosted
+     runners + GitHub Enterprise Server, and only if the client accepts it.)
+  3. Did the RFP / company_context name the **SCM platform**? →
      match its native CI: GitHub → GitHub Actions, GitLab → GitLab CI,
      Bitbucket → Bitbucket Pipelines, Azure Repos → Azure DevOps.
      (Cheapest integration; existing credentials reused.)
-  3. Is the client **deep on one cloud** with a vendor preference for
+  4. Is the client **deep on one cloud** with a vendor preference for
      vendor-native tooling? → consider AWS CodePipeline, Azure DevOps
      Pipelines, Google Cloud Build. Only choose this when the team is
      already comfortable with the vendor's CI UX.
-  4. Is the project K8s with **GitOps strongly desired**? → pair
-     whatever CI from steps 1-3 with **Argo CD** or **Flux** for the
+  5. Is the project K8s with **GitOps strongly desired**? → pair
+     whatever CI from steps 1-4 with **Argo CD** or **Flux** for the
      deploy half. The CI builds + signs + pushes; the GitOps operator
      reconciles.
-  5. **Genuinely no signal** in the inputs? → GitHub Actions is the
-     2026 default for new greenfield (ubiquitous, free tier sufficient
-     for most bids, integrates with everything). State explicitly in
-     the rationale: "no SCM signal in RFP — defaulting to GitHub Actions
-     as 2026 industry baseline; the client can swap at Phase 3 confirm
-     gate if they have a preference."
+  6. **No SCM signal?** There is NO impartial single default, and no vendor
+     (GitHub Actions included) is privileged. CI follows the SCM, and the SCM
+     is exactly what's missing — so derive the pick from the strongest other
+     signal, choose on FIT, and label it as a kickoff assumption:
+       - Microsoft / Azure-leaning org, or Azure target / .NET stack →
+         **Azure DevOps Pipelines** (native .NET build, ACR, AKS deploy).
+       - AWS target → **GitHub Actions, GitLab CI, or AWS CodePipeline** —
+         pick per the team's most likely SCM; all deploy to EKS via Argo CD / Flux.
+       - GCP target → **Cloud Build** (native) or the SCM-native CI.
+       - GitLab / self-hosted org → **GitLab CI**; Atlassian org →
+         **Bitbucket Pipelines**.
+     If even the platform / company type is ambiguous, present CI/CD as a
+     **"confirm once the SCM is chosen at kickoff"** item rather than asserting
+     a tool. Whatever you name, state it as a swappable assumption: "no SCM
+     signal; naming <tool> as it best fits <signal>; confirm at the Phase 3
+     gate." Do NOT reach for GitHub Actions reflexively just because it is
+     popular or because the example diagram shows it. And if there is ANY
+     control / sovereignty / regulated hint, do NOT name a multi-tenant SaaS
+     CI at all (see step 2) — prefer a self-hostable option the client runs
+     themselves.
 - **GitOps / Deploy**: Argo CD / Flux / Spinnaker / native cloud (CodeDeploy, Azure Deployment) — or omit if not needed
 - **IaC**: Terraform / OpenTofu / Pulumi / Bicep / CloudFormation / CDK / Ansible (for VM-based)
 - **Container registry**: ECR / ACR / GAR / Docker Hub / Harbor / Artifactory
