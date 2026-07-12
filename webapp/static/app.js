@@ -1,7 +1,7 @@
 /* Diagram Workflow SPA — vanilla JS, no build step. */
 const App = (() => {
   let current = null, detail = null, manifest = null, pollTimer = null, pendingFiles = [];
-  let selVer = null, cmpMode = false, cmpA = null, cmpB = null, folderName = '', histView = false;
+  let selVer = null, cmpMode = false, cmpA = null, cmpB = null, folderName = '', histView = false, planCache = null;
 
   // ---------- inline SVG icons (no external assets) ----------
   const P = {
@@ -75,7 +75,7 @@ const App = (() => {
 
   function openHelp() {
     const steps = [
-      ['plus', 'Create a workspace', 'Click <b>New workspace</b> and give it a name. Each workspace keeps its own inputs, versions and output.'],
+      ['plus', 'Create a workspace &amp; pick a type', 'Click <b>New workspace</b> and choose what to make: a <b>Diagram</b> (one SA-grade diagram, fast local render) or a <b>Technical Proposal</b> (a full <b>.docx</b> from a folder of RFP + docs). Each workspace keeps its own inputs, versions and output.'],
       ['edit', 'Describe the diagram', 'Type a plain-language prompt (e.g. “our AWS setup for a ride-hailing backend”, “the checkout sequence with the payment gateway”, “the order lifecycle state machine”). Optionally add docs: drag files onto the box, <b>Choose files</b>, <b>Upload a folder</b>, or <b>Browse…</b> a folder on this machine.'],
       ['spark', 'Refine', 'Click <b>Refine spec</b>. The real skill runs head-less via the <code>claude</code> CLI (usually 3–5 minutes): it reads the diagram knowledge base and designs a rigorous, standards-based spec, then stops for your review. You can watch the job log while it works.'],
       ['check', 'Review &amp; confirm', 'At the gate, check the proposed diagram(s) and the rationale. Fine-tune the spec JSON if you like (advanced), or <b>Edit inputs &amp; re-refine</b>. When happy, click <b>Generate diagrams</b>.'],
@@ -94,7 +94,7 @@ const App = (() => {
     const ov = el(`<div class="modal-ov"><div class="modal wide">
       <div class="modal-head"><div class="mi">${ic('info')}</div><h3>How to use Diagram Workflow</h3></div>
       <div class="modal-body help-body">
-        <p>Turn a plain-language idea (or a folder of project docs) into a professional, senior-SA-grade diagram — refined into a rigorous spec, confirmed by you, rendered locally, versioned, and exportable.</p>
+        <p>Turn a plain-language idea into a senior-SA-grade <b>diagram</b>, or a folder of RFP docs into a full <b>technical proposal .docx</b> — analysed, confirmed by you at a gate, generated, versioned, and exportable. The steps below apply to both (a proposal analyses a document folder instead of a prompt, and produces a .docx).</p>
         <div class="help-steps">${stepHTML}</div>
         <div class="help-tips"><div class="hs-t">Good to know</div><ul>${tips.map(t => `<li>${t}</li>`).join('')}</ul></div>
       </div>
@@ -133,20 +133,56 @@ const App = (() => {
     const box = $('#ws-list'); box.innerHTML = '';
     if (!items.length) { box.appendChild(el('<div class="side-empty">No workspaces yet.<br>Create one to begin.</div>')); return; }
     items.forEach(w => {
+      const tb = w.type === 'proposal' ? '<span class="tbadge proposal">Proposal</span>' : '<span class="tbadge diagram">Diagram</span>';
       const node = el(`<div class="ws-item ${w.id === current ? 'active' : ''}" data-id="${w.id}">
         <div class="n">${esc(w.name)}</div>
-        <div class="meta"><span class="pill ${w.status}">${w.status}</span>
-          <span>${w.mode}</span>${w.n_diagrams ? `<span>· ${w.n_diagrams} diagram${w.n_diagrams > 1 ? 's' : ''}</span>` : ''}</div></div>`);
+        <div class="meta">${tb}<span class="pill ${w.status}">${w.status}</span>${w.n_diagrams ? `<span>· ${w.n_diagrams}</span>` : ''}</div></div>`);
       node.onclick = () => select(w.id);
       box.appendChild(node);
     });
   }
 
+  function modalNewWorkspace() {
+    return new Promise(resolve => {
+      let type = null;
+      const ov = el(`<div class="modal-ov"><div class="modal wide">
+        <div class="modal-head"><div class="mi">${ic('plus')}</div><h3>New workspace</h3></div>
+        <div class="modal-body">
+          <div class="wtype-q">What do you want to create?</div>
+          <div class="wtype-grid">
+            <button class="wtype" data-t="diagram" type="button"><div class="wt-ic">${ic('diagram')}</div>
+              <div class="wt-t">Diagram</div><div class="wt-d">One SA-grade diagram from a prompt or docs. Fast, local render.</div></button>
+            <button class="wtype" data-t="proposal" type="button"><div class="wt-ic">${ic('doc2')}</div>
+              <div class="wt-t">Technical Proposal</div><div class="wt-d">A full proposal <b>.docx</b> from a folder of RFP + docs.</div></button>
+          </div>
+          <div class="field" style="margin-top:16px"><label>Name</label>
+            <input type="text" id="nw-name" placeholder="e.g. Payments Platform"></div>
+        </div>
+        <div class="modal-foot"><button class="btn ghost" data-a="c">Cancel</button>
+          <button class="btn primary" data-a="ok" disabled>Create</button></div>
+      </div></div>`);
+      const okBtn = ov.querySelector('[data-a=ok]'), nameIn = ov.querySelector('#nw-name');
+      ov.querySelectorAll('.wtype').forEach(b => b.onclick = () => {
+        type = b.dataset.t;
+        ov.querySelectorAll('.wtype').forEach(x => x.classList.toggle('on', x === b));
+        okBtn.disabled = false;
+        if (!nameIn.value.trim()) nameIn.value = type === 'proposal' ? 'Untitled proposal' : 'Untitled diagram';
+        nameIn.focus();
+      });
+      const done = v => { ov.remove(); document.removeEventListener('keydown', key); resolve(v); };
+      const ok = () => { if (!type) return; done({ name: nameIn.value.trim() || (type === 'proposal' ? 'Untitled proposal' : 'Untitled diagram'), type }); };
+      const key = e => { if (e.key === 'Escape') done(null); if (e.key === 'Enter' && type) { e.preventDefault(); ok(); } };
+      ov.addEventListener('mousedown', e => { if (e.target === ov) done(null); });
+      ov.querySelector('[data-a=c]').onclick = () => done(null);
+      okBtn.onclick = ok;
+      document.body.appendChild(ov);
+      document.addEventListener('keydown', key);
+    });
+  }
   async function newWorkspace() {
-    const name = await modalPrompt({ title: 'New workspace', message: 'Give it a name so you can find it later.',
-      value: 'Untitled diagram', placeholder: 'e.g. Payments Architecture', okText: 'Create' });
-    if (!name) return;
-    const w = await api('POST', '/api/workspaces', { name });
+    const res = await modalNewWorkspace();
+    if (!res) return;
+    const w = await api('POST', '/api/workspaces', { name: res.name, type: res.type });
     await loadList(); select(w.id);
   }
 
@@ -204,44 +240,52 @@ const App = (() => {
     // show the creation time in the user's own machine timezone (not UTC)
     let created = d.created || '';
     try { const dt = new Date(d.created); if (!isNaN(dt)) created = dt.toLocaleString(); } catch (e) {}
+    const tbadge = d.type === 'proposal' ? '<span class="tbadge proposal">Technical Proposal</span>' : '<span class="tbadge diagram">Diagram</span>';
     let body = `<div class="ws-head">
         <input class="ws-title" id="ws-title" value="${esc(d.name)}" readonly>
-        <span class="pill ${d.status}">${d.status}</span><div class="spacer"></div>
+        ${tbadge}<span class="pill ${d.status}">${d.status}</span><div class="spacer"></div>
         <button class="btn danger" onclick="App.del()">${ic('trash')} Delete</button></div>
       <div class="ws-sub">${ic('layers')}<span>${d.mode} mode</span><span class="sep">•</span>${ic('clock')}<span>created ${esc(created)}</span></div>`;
     body += stepper(d.status);
     if (d.error) body += `<div class="errbox">${ic('warn')}<span>${esc(d.error)}</span></div>`;
 
+    const isProp = d.type === 'proposal';
     const versions = d.versions || [];
     if (histView && versions.length) {
-      body += viewPreview();                 // full version viewer (with a Back bar)
+      body += isProp ? viewProposalPreview() : viewPreview();
     } else {
       if (d.status === 'new') body += viewInputs();
-      else if (d.status === 'refining') body += viewWorking('Refining your request', 'Running the skill via the claude CLI to build a rigorous spec. This usually takes 3–5 minutes — it reads the diagram knowledge base and designs the spec, then stops for your review.');
-      else if (d.status === 'refined') body += viewReview();
-      else if (d.status === 'generating') body += viewWorking('Rendering diagrams', 'Deterministic local renderers: PNG + SVG + editable .drawio + Word .docx.');
-      else if (d.status === 'generated') body += viewPreview();
+      else if (d.status === 'refining') body += isProp
+        ? viewWorking('Analyzing the RFP + docs', 'Running the technical-proposal skill (Phase 0–3) via the claude CLI: it ingests the docs and proposes a tech stack + architecture, then stops for your review. Usually a few minutes.')
+        : viewWorking('Refining your request', 'Running the skill via the claude CLI to build a rigorous spec. This usually takes 3–5 minutes — it reads the diagram knowledge base and designs the spec, then stops for your review.');
+      else if (d.status === 'refined') body += isProp ? viewProposalReview() : viewReview();
+      else if (d.status === 'generating') body += isProp
+        ? viewWorking('Building the proposal', 'Drawing the diagrams, assembling the .docx, and running the strict format review. This is a big agent run — it can take 10–30 minutes. You can watch the job log.')
+        : viewWorking('Rendering diagrams', 'Deterministic local renderers: PNG + SVG + editable .drawio + Word .docx.');
+      else if (d.status === 'generated') body += isProp ? viewProposalPreview() : viewPreview();
       else if (d.status === 'error') body += viewError();
-      // history is reachable from any state once at least one version exists
       if (versions.length && d.status !== 'generated') body += viewHistoryStrip();
     }
 
     v.innerHTML = body;
     if (!histView && d.status === 'new') wireInputs();
-    if (!histView && d.status === 'refined') loadManifestInto();
+    if (!histView && d.status === 'refined') { if (isProp) loadPlanInto(); else loadManifestInto(); }
   }
 
   // ---------- INPUTS ----------
   function viewInputs() {
+    const isProp = detail.type === 'proposal';
     return `<div class="card">
-      <div class="card-head"><div class="hi">${ic('edit')}</div><div><h3>Describe the diagram</h3><div class="sub">A plain-language idea, uploaded docs, or a folder — anything works.</div></div></div>
+      <div class="card-head"><div class="hi">${ic(isProp ? 'doc2' : 'edit')}</div><div>
+        <h3>${isProp ? 'Add the project docs' : 'Describe the diagram'}</h3>
+        <div class="sub">${isProp ? 'Upload a folder of the RFP + supporting docs (required). The skill analyses them and proposes a stack + architecture.' : 'A plain-language idea, uploaded docs, or a folder — anything works.'}</div></div></div>
       <div class="card-body">
         <div class="field">
-          <label>Prompt <span class="hint">plain language — it gets refined into a proper spec</span></label>
-          <textarea id="in-prompt" rows="4" placeholder="e.g. our AWS setup for a ride-hailing backend · the checkout sequence with the payment gateway · the order lifecycle state machine">${esc(detail.prompt || '')}</textarea>
+          <label>${isProp ? 'Extra context' : 'Prompt'} <span class="hint">${isProp ? 'optional — anything to steer the proposal (constraints, preferences)' : 'plain language — it gets refined into a proper spec'}</span></label>
+          <textarea id="in-prompt" rows="${isProp ? 3 : 4}" placeholder="${isProp ? 'e.g. must stay in the client’s AWS account · budget-sensitive · they prefer .NET' : 'e.g. our AWS setup for a ride-hailing backend · the checkout sequence with the payment gateway · the order lifecycle state machine'}">${esc(detail.prompt || '')}</textarea>
         </div>
         <div class="field">
-          <label>Add project docs <span class="hint">optional — .md .txt .pdf .docx .xlsx (ingested &amp; analysed like an RFP)</span></label>
+          <label>${isProp ? 'Project docs (RFP + supporting) — required' : 'Add project docs'} <span class="hint">${isProp ? '.pdf .docx .doc .txt .md .xlsx' : 'optional — .md .txt .pdf .docx .xlsx (ingested &amp; analysed like an RFP)'}</span></label>
           <div class="drop" id="drop">${ic('upload')}<div class="big">Drag files here</div><div class="small">or use the buttons below</div></div>
           <input type="file" id="filepick" multiple style="display:none">
           <input type="file" id="folderpick" webkitdirectory directory multiple style="display:none">
@@ -260,7 +304,7 @@ const App = (() => {
         </div>
       </div>
       <div class="card-foot"><div class="spacer"></div>
-        <button class="btn primary lg" onclick="App.saveAndRefine()">${ic('spark')} Refine spec</button></div>
+        <button class="btn primary lg" onclick="App.saveAndRefine()">${ic('spark')} ${isProp ? 'Analyze' : 'Refine spec'}</button></div>
     </div>`;
   }
   const DOC_EXT = ['txt', 'md', 'markdown', 'csv', 'json', 'yaml', 'yml', 'docx', 'xlsx', 'xlsm', 'pdf'];
@@ -363,6 +407,72 @@ const App = (() => {
     try { const p = JSON.parse($('#manifest-json').value); await api('PUT', '/api/workspaces/' + current + '/manifest', p); manifest = p; toast('Spec saved'); }
     catch (e) { toast('Invalid JSON: ' + e.message, true); }
   }
+
+  // ---------- PROPOSAL: plan gate ----------
+  function viewProposalReview() {
+    return `<div class="card">
+      <div class="card-head"><div class="hi">${ic('check')}</div><div><h3>Review the proposal plan</h3><div class="sub">Confirm the stack, architecture and diagrams before the (long) generate step.</div></div></div>
+      <div class="card-body" id="plan-body"><div class="working"><div class="orbit"></div><div class="wt">Loading plan…</div></div></div>
+    </div>`;
+  }
+  async function loadPlanInto() {
+    let plan;
+    try { plan = await api('GET', '/api/workspaces/' + current + '/plan'); }
+    catch (e) { $('#plan-body').innerHTML = `<div class="errbox">${ic('warn')}<span>${esc(e.message)}</span></div>`; return; }
+    planCache = plan;
+    const stack = (plan.tech_stack || []).map(s => `<tr><td>${esc(s.layer)}</td><td><b>${esc(s.choice)}</b></td><td>${esc(s.rationale || '')}</td></tr>`).join('');
+    const dgs = (plan.diagrams || []).map(dd => `<div class="dgram"><div class="dh"><span class="kindtag">${esc(dd.kind || '')}</span><span class="t">${esc(dd.title || dd.slug)}</span></div><div class="rat">${esc(dd.purpose || '')}</div></div>`).join('');
+    $('#plan-body').innerHTML = `
+      ${plan.summary ? `<div class="summary">${ic('info')}<span>${esc(plan.summary)}</span></div>` : ''}
+      ${plan.project ? `<div class="review-count">Project: <b>${esc(plan.project)}</b></div>` : ''}
+      ${stack ? `<div class="hs-t" style="margin:14px 0 6px">Proposed technology stack</div>
+        <div class="tbl-wrap"><table class="ptbl"><thead><tr><th>Layer</th><th>Choice</th><th>Rationale</th></tr></thead><tbody>${stack}</tbody></table></div>` : ''}
+      ${plan.architecture ? `<div class="hs-t" style="margin:16px 0 6px">Architecture</div><div class="rat" style="white-space:pre-wrap">${esc(plan.architecture)}</div>` : ''}
+      ${dgs ? `<div class="hs-t" style="margin:16px 0 8px">${(plan.diagrams || []).length} diagram(s) in the proposal</div>${dgs}` : ''}
+      <details class="spec-edit"><summary>${ic('chevron')} Edit plan JSON (advanced)</summary>
+        <textarea class="mono" id="plan-json" rows="16" style="margin-top:12px">${esc(JSON.stringify(plan, null, 2))}</textarea>
+        <div class="row end" style="margin-top:10px"><button class="btn sm" onclick="App.savePlan()">${ic('check')} Save edits</button></div>
+      </details>
+      <div class="row" style="margin-top:20px">
+        <button class="btn ghost" onclick="App.backToInputs()">${ic('edit')} Edit inputs &amp; re-analyze</button>
+        <div class="spacer"></div>
+        <button class="btn primary lg" onclick="App.generate()">${ic('play')} Generate proposal (.docx)</button>
+      </div>`;
+  }
+  async function savePlan() {
+    try { const p = JSON.parse($('#plan-json').value); await api('PUT', '/api/workspaces/' + current + '/plan', p); planCache = p; toast('Plan saved'); }
+    catch (e) { toast('Invalid JSON: ' + e.message, true); }
+  }
+  async function reopenPlan() {
+    const p = planCache || await api('GET', '/api/workspaces/' + current + '/plan');
+    await api('PUT', '/api/workspaces/' + current + '/plan', p); histView = false; selVer = null; await refresh();
+  }
+  function viewProposalPreview() {
+    const versions = detail.versions || [];
+    if (!versions.length) return `<div class="card"><div class="card-body"><div class="errbox">${ic('warn')}<span>No proposal produced.</span></div></div></div>`;
+    if (selVer == null || !versions.some(v => v.id === selVer)) selVer = detail.current_version ?? versions[versions.length - 1].id;
+    const v = verById(selVer);
+    const base = `/api/workspaces/${current}/versions/${v.id}/preview/`;
+    const dgs = (v.diagrams || []).map(n => `<div class="tile"><div class="imgwrap" onclick="App.zoom('${base}${esc(n)}')"><span class="zoomhint">${ic('zoom')}</span><img src="${base}${esc(n)}" loading="lazy"></div></div>`).join('');
+    const back = histView ? `<button class="btn ghost sm" onclick="App.closeHistory()" style="margin-bottom:14px">← Back to ${esc(detail.status)}</button>` : '';
+    return `${back}<div class="card">
+      <div class="card-head"><div class="hi">${ic('doc2')}</div><div><h3>${histView ? 'Version history' : 'Proposal ready'}</h3><div class="sub">${versions.length} version${versions.length > 1 ? 's' : ''} — download the .docx, review the diagrams, iterate or export.</div></div></div>
+      <div class="card-body">
+        ${timelineHTML()}
+        <div class="docx-hero"><div class="dh-ic">${ic('doc2')}</div>
+          <div class="dh-txt"><div class="dh-t">${esc(v.docx)}</div><div class="dh-s">${(v.diagrams || []).length} diagram(s) · SharePoint-compatible</div></div>
+          <a class="btn primary lg" href="${base}${esc(v.docx)}" download>${ic('download')} Download .docx</a></div>
+        ${v.report ? `<details class="spec-edit"><summary>${ic('chevron')} Run report</summary><div class="log" style="margin-top:10px"><pre>${esc(v.report)}</pre></div></details>` : ''}
+        ${dgs ? `<div class="hs-t" style="margin:18px 0 8px">Diagrams in this proposal</div><div class="grid">${dgs}</div>` : ''}
+      </div>
+      <div class="card-foot">
+        <button class="btn ghost" onclick="App.backToInputs()">${ic('edit')} Edit inputs</button>
+        <button class="btn" onclick="App.reopenPlan()">${ic('code')} Edit plan &amp; regenerate</button>
+        <div class="spacer"></div>
+        <button class="btn primary lg" onclick="App.exportZip()">${ic('download')} Export v${selVer} (zip)</button>
+      </div>
+    </div>`;
+  }
   async function backToInputs() {
     histView = false; cmpMode = false;   // leave any history view before showing the inputs screen
     const fd = new FormData();
@@ -415,8 +525,9 @@ const App = (() => {
         <div class="vt"><span class="vdot ${cls}"></span>v${v.id}${cur ? ' <span class="vnow">latest</span>' : ''}${v.label ? ` · ${esc(v.label)}` : ''}</div>
         <div class="vm">${esc(shortTime(v.created))} · ${esc(v.source || '')}</div></div>`;
     }).join('');
-    return `<div class="vbar"><div class="vscroll">${chips}</div>
-      <button class="btn sm ${cmpMode ? 'primary' : ''}" onclick="App.toggleCompare()">${ic('grid')} ${cmpMode ? 'Exit compare' : 'Compare'}</button></div>`;
+    const cmpBtn = detail.type === 'proposal' ? ''   // compare grid is diagram-specific
+      : `<button class="btn sm ${cmpMode ? 'primary' : ''}" onclick="App.toggleCompare()">${ic('grid')} ${cmpMode ? 'Exit compare' : 'Compare'}</button>`;
+    return `<div class="vbar"><div class="vscroll">${chips}</div>${cmpBtn}</div>`;
   }
   function verSelect(id, side) {
     const vs = (detail.versions || []).slice().sort((a, b) => b.id - a.id);
@@ -540,5 +651,6 @@ const App = (() => {
 
   return { newWorkspace, saveAndRefine, generate, exportZip, del, zoom, rmFile,
            saveManifest, backToInputs, pickFiles, pickFolder, browseFolder,
-           viewVersion, toggleCompare, setCmp, iterateFrom, openHistory, closeHistory, openHelp };
+           viewVersion, toggleCompare, setCmp, iterateFrom, openHistory, closeHistory, openHelp,
+           savePlan, reopenPlan };
 })();

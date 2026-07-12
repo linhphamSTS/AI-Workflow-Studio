@@ -81,7 +81,12 @@ svg{display:block}
 .ws-item .n{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.01em}
 .ws-item .meta{display:flex;gap:8px;align-items:center;margin-top:7px;font-size:11px;color:var(--faint)}
 .side-empty{color:var(--faint);font-size:12.5px;text-align:center;padding:24px 10px;line-height:1.6}
-.side-foot{font-size:11px;color:var(--faint);line-height:1.6;border-top:1px solid var(--line);padding-top:12px;display:flex;align-items:center;gap:6px}
+.side-foot{font-size:11px;color:var(--faint);line-height:1.6;border-top:1px solid var(--line);padding-top:12px}
+.side-foot .sf-line{display:flex;align-items:center;gap:6px}
+.side-author{margin-top:9px;line-height:1.55}
+.side-author b{color:var(--muted);font-weight:700}
+.side-author a{color:var(--muted)}
+.side-author a:hover{color:var(--brand-1)}
 .side-foot .dot-live{width:6px;height:6px;border-radius:50%;background:var(--good);box-shadow:0 0 0 3px var(--good-bg)}
 
 /* status pills */
@@ -328,6 +333,46 @@ details.spec-edit[open] summary .icon{transform:rotate(90deg)}
 .modal-foot{display:flex;gap:10px;justify-content:flex-end;padding:18px 22px 20px}
 .btn.danger-solid{background:var(--bad);border-color:transparent;color:#fff}
 .btn.danger-solid:hover{filter:brightness(1.06);box-shadow:0 6px 18px rgba(225,29,72,.35)}
+
+/* workspace-type chooser (new-workspace modal) */
+.wtype-q{font-size:13px;font-weight:600;color:var(--ink-2);margin-bottom:10px}
+.wtype-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.wtype{text-align:left;background:var(--surface-2);border:1.5px solid var(--line);border-radius:12px;
+  padding:14px;cursor:pointer;transition:all .14s;display:flex;flex-direction:column;gap:7px;font-family:inherit}
+.wtype:hover{border-color:var(--line-2);transform:translateY(-1px)}
+.wtype.on{border-color:transparent;background:var(--grad-soft);box-shadow:0 0 0 1.5px var(--brand-1) inset}
+.wt-ic{width:34px;height:34px;border-radius:9px;background:var(--surface-3);color:var(--brand-1);
+  display:flex;align-items:center;justify-content:center}
+.wtype.on .wt-ic{background:#fff}
+.wt-ic .icon{width:18px;height:18px}
+.wt-t{font-weight:700;font-size:14px;letter-spacing:-.01em;color:var(--ink)}
+.wt-d{font-size:11.5px;color:var(--muted);line-height:1.45}
+
+/* proposal plan table */
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+.ptbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.ptbl th{text-align:left;background:var(--surface-3);color:var(--muted);font-weight:700;
+  padding:9px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--line)}
+.ptbl td{padding:10px 12px;border-bottom:1px solid var(--line);color:var(--ink-2);vertical-align:top;line-height:1.5}
+.ptbl tr:last-child td{border-bottom:none}
+.ptbl td:first-child{font-weight:600;color:var(--muted);white-space:nowrap}
+.ptbl td b{color:var(--ink)}
+
+/* proposal .docx download hero */
+.docx-hero{display:flex;align-items:center;gap:15px;background:var(--grad-soft);border:1px solid transparent;
+  border-radius:var(--r);padding:16px 18px;margin:6px 0 4px}
+.docx-hero .dh-ic{width:44px;height:44px;border-radius:11px;background:#fff;color:var(--brand-1);
+  display:flex;align-items:center;justify-content:center;flex:none;box-shadow:var(--sh-sm)}
+.docx-hero .dh-ic .icon{width:23px;height:23px}
+.docx-hero .dh-txt{flex:1;min-width:0}
+.docx-hero .dh-t{font-weight:700;font-size:14.5px;letter-spacing:-.01em;word-break:break-word}
+.docx-hero .dh-s{font-size:12px;color:var(--muted);margin-top:2px}
+.docx-hero a.btn{flex:none;text-decoration:none}
+
+/* type badge (sidebar + header) */
+.tbadge{font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;font-weight:800;padding:2px 7px;border-radius:5px;white-space:nowrap}
+.tbadge.diagram{background:rgba(76,141,255,.16);color:#4c8dff}
+.tbadge.proposal{background:rgba(124,92,255,.16);color:var(--brand-2)}
 .help-btn{justify-content:flex-start;color:var(--muted)}
 .help-btn:hover{color:var(--brand-1)}
 

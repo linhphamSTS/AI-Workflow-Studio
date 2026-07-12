@@ -51,12 +51,16 @@ PROPOSAL_SKILL_DIR = REPO_ROOT / "technical-proposal" / "skill" / "linhpham-tech
 WORKSPACES_DIR = Path(os.environ.get("DIAGRAM_WORKSPACES_DIR", str(WEBAPP_DIR / "workspaces"))).resolve()
 STATIC_DIR = WEBAPP_DIR / "static"
 REFINE_PROMPT_TMPL = WEBAPP_DIR / "refine_prompt.md"
+PROPOSAL_ANALYZE_TMPL = WEBAPP_DIR / "proposal_analyze_prompt.md"
+PROPOSAL_GENERATE_TMPL = WEBAPP_DIR / "proposal_generate_prompt.md"
 
 WORKSPACES_DIR.mkdir(parents=True, exist_ok=True)
 
 CLAUDE = shutil.which("claude") or "claude"
 REFINE_MODEL = os.environ.get("DIAGRAM_REFINE_MODEL", "").strip()
 REFINE_TIMEOUT = int(os.environ.get("DIAGRAM_REFINE_TIMEOUT", "900"))   # seconds
+PROPOSAL_ANALYZE_TIMEOUT = int(os.environ.get("PROPOSAL_ANALYZE_TIMEOUT", "1200"))    # 20 min
+PROPOSAL_GENERATE_TIMEOUT = int(os.environ.get("PROPOSAL_GENERATE_TIMEOUT", "3600"))  # 60 min (heavy)
 RENDER_TIMEOUT = int(os.environ.get("DIAGRAM_RENDER_TIMEOUT", "180"))   # per diagram
 
 RENDERER = {"cloud": "build_cloud.py", "graph": "build_graph.py", "sequence": "build_sequence.py"}
@@ -64,6 +68,22 @@ RENDERER = {"cloud": "build_cloud.py", "graph": "build_graph.py", "sequence": "b
 # Run child processes without flashing a console window on Windows. 0 (the default)
 # on macOS/Linux, so this is safe cross-platform.
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+
+def _hidden_console() -> dict:
+    """Spawn kwargs so a child runs in a HIDDEN console on Windows. CREATE_NO_WINDOW gives the
+    child NO console, so ITS OWN children each allocate a fresh VISIBLE console (the flash). A
+    hidden NEW console is instead INHERITED by grandchildren, so nothing flashes. Used for
+    `claude -p`, which internally runs many tools (python/dot/bash). No-op off Windows; set
+    DIAGRAM_HIDDEN_CONSOLE=0 to fall back to CREATE_NO_WINDOW."""
+    if os.name != "nt":
+        return {}
+    if os.environ.get("DIAGRAM_HIDDEN_CONSOLE", "1") != "1":
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 0  # SW_HIDE
+    return {"startupinfo": si, "creationflags": subprocess.CREATE_NEW_CONSOLE}
 
 # in-memory job registry: ws_id -> {"phase","running","log":[...] }
 JOBS: dict[str, dict] = {}
@@ -187,7 +207,7 @@ def refine_job(ws_id: str):
         if REFINE_MODEL:
             cmd += ["--model", REFINE_MODEL]
         job_log(ws_id, "$ claude -p (refine)  [usually 3-5 minutes: reads the KB, designs the spec]")
-        p = subprocess.run(cmd, cwd=str(d), env=_child_env(), creationflags=_NO_WINDOW,
+        p = subprocess.run(cmd, cwd=str(d), env=_child_env(), **_hidden_console(),
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=REFINE_TIMEOUT)
         tail = (p.stdout or "").strip()[-800:]
@@ -211,6 +231,137 @@ def refine_job(ws_id: str):
         job_log(ws_id, "! refine timed out")
     except Exception as e:  # noqa: BLE001
         set_status(ws_id, "error", error=f"refine failed: {e}")
+        job_log(ws_id, f"! {e}")
+    finally:
+        with JOBS_LOCK:
+            JOBS.get(ws_id, {})["running"] = False
+
+
+# --------------------------------------------------------- PROPOSAL (drives the tech-proposal skill)
+def _fill_proposal_prompt(tmpl_path: Path, ws_id: str, meta: dict, output_dir: Path | None = None) -> str:
+    d = WORKSPACES_DIR / ws_id
+    fwd = lambda p: str(p).replace("\\", "/")
+    return (tmpl_path.read_text(encoding="utf-8")
+            .replace("{{WORKSPACE_DIR}}", fwd(d))
+            .replace("{{PROPOSAL_SKILL_DIR}}", fwd(PROPOSAL_SKILL_DIR))
+            .replace("{{OUTPUT_DIR}}", fwd(output_dir) if output_dir else fwd(d / "output"))
+            .replace("{{FOLDER}}", meta.get("folder", "") or "(none; use the uploaded inputs / digest)")
+            .replace("{{PROMPT_TEXT}}", meta.get("prompt", "") or "(no extra context)"))
+
+
+def _run_claude(ws_id: str, prompt: str, timeout: int, label: str) -> subprocess.CompletedProcess:
+    d = WORKSPACES_DIR / ws_id
+    cmd = [CLAUDE, "-p", prompt, "--output-format", "json",
+           "--permission-mode", "bypassPermissions",
+           "--add-dir", str(PROPOSAL_SKILL_DIR), "--add-dir", str(SKILL_DIR)]
+    if REFINE_MODEL:
+        cmd += ["--model", REFINE_MODEL]
+    job_log(ws_id, f"$ claude -p ({label})")
+    p = subprocess.run(cmd, cwd=str(d), env=_child_env(), **_hidden_console(),
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    tail = (p.stdout or "").strip()[-800:]
+    if tail:
+        job_log(ws_id, tail)
+    if p.stderr.strip():
+        job_log(ws_id, "stderr: " + p.stderr.strip()[-500:])
+    return p
+
+
+def analyze_job(ws_id: str):
+    """Proposal analyze: run the skill's Phase 0-3 head-less -> spec/plan.json, stop at the gate."""
+    try:
+        meta = read_meta(ws_id)
+        d = WORKSPACES_DIR / ws_id
+        (d / "spec").mkdir(parents=True, exist_ok=True)
+        sources = []
+        if (d / "inputs").exists() and any((d / "inputs").iterdir()):
+            sources.append(d / "inputs")
+        if meta.get("folder") and Path(meta["folder"]).exists():
+            sources.append(Path(meta["folder"]))
+        if sources:
+            run_ingest(ws_id, sources[0])
+        plan = d / "spec" / "plan.json"
+        if plan.exists():
+            plan.unlink()
+        prompt = _fill_proposal_prompt(PROPOSAL_ANALYZE_TMPL, ws_id, meta)
+        (d / "spec" / "_analyze_prompt.md").write_text(prompt, encoding="utf-8")
+        job_log(ws_id, "  [analyzing the RFP + docs, proposing stack/architecture — a few minutes]")
+        _run_claude(ws_id, prompt, PROPOSAL_ANALYZE_TIMEOUT, "proposal analyze")
+        if not plan.exists():
+            raise RuntimeError("analyze finished but spec/plan.json was not written (check the log)")
+        data = json.loads(plan.read_text(encoding="utf-8"))
+        set_status(ws_id, "refined", error="",
+                   n_diagrams=len(data.get("diagrams", [])))
+        job_log(ws_id, f"OK analyze -> plan with {len(data.get('diagrams', []))} diagram(s), "
+                       f"{len(data.get('tech_stack', []))} stack layer(s)")
+    except subprocess.TimeoutExpired:
+        set_status(ws_id, "error", error=f"analyze timed out after {PROPOSAL_ANALYZE_TIMEOUT}s")
+    except Exception as e:  # noqa: BLE001
+        set_status(ws_id, "error", error=f"analyze failed: {e}")
+        job_log(ws_id, f"! {e}")
+    finally:
+        with JOBS_LOCK:
+            JOBS.get(ws_id, {})["running"] = False
+
+
+def proposal_generate_job(ws_id: str):
+    """Proposal generate: run the skill's Phase 4-6 head-less -> a .docx + diagrams in a version dir."""
+    try:
+        d = WORKSPACES_DIR / ws_id
+        plan = d / "spec" / "plan.json"
+        if not plan.exists():
+            raise RuntimeError("no plan to generate from; analyze first")
+        meta = read_meta(ws_id)
+        vid = max((v["id"] for v in meta.get("versions", [])), default=0) + 1
+        out = _versions_dir(ws_id) / str(vid)
+        (out / "diagrams").mkdir(parents=True, exist_ok=True)
+        prompt = _fill_proposal_prompt(PROPOSAL_GENERATE_TMPL, ws_id, meta, output_dir=out)
+        (d / "spec" / "_generate_prompt.md").write_text(prompt, encoding="utf-8")
+        job_log(ws_id, "  [drawing diagrams + assembling the .docx + strict format review — this can take 10-30 min]")
+        _run_claude(ws_id, prompt, PROPOSAL_GENERATE_TIMEOUT, "proposal generate")
+
+        docx = next(iter(sorted(out.glob("*.docx"))), None)
+        if not docx:
+            # robustness: the skill may have written to the workspace output/ (its natural
+            # location) instead of the version dir — adopt it into the version snapshot.
+            stray = d / "output"
+            if any(stray.glob("*.docx")):
+                for p in list(stray.glob("*")):
+                    if p.name == "versions":            # never fold the versions tree into itself
+                        continue
+                    dest = out / p.name
+                    if p.is_dir():
+                        shutil.copytree(p, dest, dirs_exist_ok=True); shutil.rmtree(p, ignore_errors=True)
+                    else:
+                        shutil.move(str(p), str(dest))
+                docx = next(iter(sorted(out.glob("*.docx"))), None)
+        pngs = sorted(p.name for p in (out / "diagrams").glob("*.png"))
+        if not docx:
+            raise RuntimeError("generate finished but no .docx was produced (check the log)")
+        report = ""
+        rp = out / "_report.md"
+        if rp.exists():
+            report = rp.read_text(encoding="utf-8")[:2000]
+
+        meta = read_meta(ws_id)
+        prev = (meta.get("versions") or [])[-1] if meta.get("versions") else None
+        source = "Initial" if not prev else (
+            "Re-analyzed inputs" if (prev.get("prompt", "") != meta.get("prompt", "")
+                                     or prev.get("folder", "") != meta.get("folder", "")) else "Regenerated")
+        record = {"id": vid, "created": _now(), "source": source, "kind": "proposal",
+                  "prompt": meta.get("prompt", ""), "folder": meta.get("folder", ""),
+                  "docx": docx.name, "diagrams": pngs, "n_diagrams": len(pngs),
+                  "report": report, "label": ""}
+        meta.setdefault("versions", []).append(record)
+        meta["current_version"] = vid
+        meta["status"] = "generated"
+        meta["error"] = ""
+        write_meta(ws_id, meta)
+        job_log(ws_id, f"OK proposal v{vid} -> {docx.name}, {len(pngs)} diagram(s)")
+    except subprocess.TimeoutExpired:
+        set_status(ws_id, "error", error=f"generate timed out after {PROPOSAL_GENERATE_TIMEOUT}s")
+    except Exception as e:  # noqa: BLE001
+        set_status(ws_id, "error", error=f"generate failed: {e}")
         job_log(ws_id, f"! {e}")
     finally:
         with JOBS_LOCK:
@@ -415,6 +566,7 @@ def list_workspaces():
             continue
         m = json.loads(mf.read_text(encoding="utf-8"))
         items.append({"id": m["id"], "name": m.get("name", m["id"]),
+                      "type": m.get("type", "diagram"),
                       "status": m.get("status", "new"), "mode": m.get("mode", "text"),
                       "created": m.get("created"), "updated": m.get("updated"),
                       "n_diagrams": m.get("n_diagrams", 0)})
@@ -425,12 +577,16 @@ def list_workspaces():
 @app.post("/api/workspaces")
 async def create_workspace(payload: dict):
     name = (payload.get("name") or "Untitled").strip()[:80]
+    wtype = (payload.get("type") or "diagram").strip().lower()
+    if wtype not in ("diagram", "proposal"):
+        raise HTTPException(400, "type must be 'diagram' or 'proposal'")
     ws_id = uuid.uuid4().hex[:12]
     d = WORKSPACES_DIR / ws_id
     (d / "inputs").mkdir(parents=True, exist_ok=True)
     (d / "spec").mkdir(parents=True, exist_ok=True)
     (d / "output" / "diagrams").mkdir(parents=True, exist_ok=True)
-    meta = {"id": ws_id, "name": name, "created": _now(), "mode": "text",
+    meta = {"id": ws_id, "name": name, "type": wtype, "created": _now(),
+            "mode": "folder" if wtype == "proposal" else "text",
             "prompt": "", "folder": "", "status": "new", "error": ""}
     write_meta(ws_id, meta)
     return meta
@@ -519,7 +675,12 @@ def pick_folder():
 @app.post("/api/workspaces/{ws_id}/refine")
 def refine(ws_id: str):
     meta = read_meta(ws_id)
-    if not (meta.get("prompt") or meta.get("folder") or list((WORKSPACES_DIR / ws_id / "inputs").glob("*"))):
+    is_proposal = meta.get("type") == "proposal"
+    has_folder = bool(meta.get("folder")) or bool(list((WORKSPACES_DIR / ws_id / "inputs").glob("*")))
+    if is_proposal and not has_folder:
+        raise HTTPException(400, "A technical proposal needs source docs: upload a folder of RFP + "
+                                 "supporting docs, or point at a folder on this machine.")
+    if not is_proposal and not (meta.get("prompt") or has_folder):
         raise HTTPException(400, "nothing to refine: add a prompt, upload files, or set a folder")
     h = _claude_health()
     if not h["claude_installed"]:
@@ -527,8 +688,8 @@ def refine(ws_id: str):
                                  "(Generate / Preview / Export work without it.)")
     if not h["logged_in"]:
         raise HTTPException(400, "You're not signed in to 'claude'. Run `claude auth login` in a terminal, "
-                                 "then reload and try Refine again.")
-    start_job(ws_id, "refine", refine_job)
+                                 "then reload and try again.")
+    start_job(ws_id, "refine", analyze_job if is_proposal else refine_job)
     return {"status": "refining"}
 
 
@@ -553,10 +714,37 @@ async def put_manifest(ws_id: str, payload: dict):
 
 @app.post("/api/workspaces/{ws_id}/generate")
 def generate(ws_id: str):
+    meta = read_meta(ws_id)
+    if meta.get("type") == "proposal":
+        if not (ws_dir(ws_id) / "spec" / "plan.json").exists():
+            raise HTTPException(400, "analyze first (no plan)")
+        h = _claude_health()
+        if not h["claude_installed"] or not h["logged_in"]:
+            raise HTTPException(400, "Generating a proposal needs the signed-in 'claude' CLI "
+                                     "(run `claude auth login`), then reload.")
+        start_job(ws_id, "generate", proposal_generate_job)
+        return {"status": "generating"}
     if not (ws_dir(ws_id) / "spec" / "manifest.json").exists():
         raise HTTPException(400, "refine first (no manifest)")
     start_job(ws_id, "generate", generate_job)
     return {"status": "generating"}
+
+
+@app.get("/api/workspaces/{ws_id}/plan")
+def get_plan(ws_id: str):
+    pf = ws_dir(ws_id) / "spec" / "plan.json"
+    if not pf.exists():
+        raise HTTPException(404, "no plan yet")
+    return JSONResponse(json.loads(pf.read_text(encoding="utf-8")))
+
+
+@app.put("/api/workspaces/{ws_id}/plan")
+async def put_plan(ws_id: str, payload: dict):
+    ws_dir(ws_id)
+    (WORKSPACES_DIR / ws_id / "spec" / "plan.json").write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    set_status(ws_id, "refined", n_diagrams=len(payload.get("diagrams", [])))
+    return {"ok": True}
 
 
 _MEDIA = {"png": "image/png", "svg": "image/svg+xml", "drawio": "application/xml",
@@ -576,7 +764,10 @@ def _current_vid(meta: dict) -> int | None:
 def preview_version(ws_id: str, vid: int, name: str):
     ws_dir(ws_id)
     safe = Path(name).name
-    f = _versions_dir(ws_id) / str(vid) / safe
+    base = _versions_dir(ws_id) / str(vid)
+    f = base / safe
+    if not f.exists():                       # proposal diagrams live in a diagrams/ subdir
+        f = base / "diagrams" / safe
     if not f.exists():
         raise HTTPException(404, f"not found: v{vid}/{safe}")
     media = _MEDIA.get(safe.rsplit(".", 1)[-1].lower(), "application/octet-stream")
@@ -627,11 +818,12 @@ def export(ws_id: str, version: int | None = None):
     zpath = d / "output" / f"{slugify(meta.get('name','diagrams'))}_v{vid}.zip"
     if zpath.exists():
         zpath.unlink()
+    keep = (".png", ".svg", ".drawio", ".docx", ".json", ".md")
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
-        for p in sorted(out.glob("*")):
-            if p.suffix.lower() in (".png", ".svg", ".drawio", ".docx") \
-                    or p.name in ("diagrams.json", "_check.json", "manifest.json"):
-                z.write(p, p.name)
+        for p in sorted(out.rglob("*")):     # recursive: covers proposal's diagrams/ subdir + docx
+            if p.is_file() and (p.suffix.lower() in keep) and not p.name.endswith(".spec.json") \
+                    and not p.name.endswith(".meta.json") and not p.name.endswith(".lint.json"):
+                z.write(p, str(p.relative_to(out)))
     return FileResponse(str(zpath), media_type="application/zip", filename=zpath.name)
 
 
