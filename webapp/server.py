@@ -37,9 +37,14 @@ from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 # --------------------------------------------------------------------------- paths
+# webapp/ sits at the monorepo root, beside the skill folders:
+#   <repo>/webapp/  <repo>/diagram/  <repo>/technical-proposal/
 WEBAPP_DIR = Path(__file__).resolve().parent
-SKILL_DIR = WEBAPP_DIR.parent / "skill" / "linhpham-diagram"
+REPO_ROOT = WEBAPP_DIR.parent
+SKILL_DIR = REPO_ROOT / "diagram" / "skill" / "linhpham-diagram"
 SCRIPTS_DIR = SKILL_DIR / "scripts"
+# (future) proposal generation drives the sibling skill:
+PROPOSAL_SKILL_DIR = REPO_ROOT / "technical-proposal" / "skill" / "linhpham-technicalproposal"
 # Where a user's workspaces (their inputs + generated output) live. Override with
 # DIAGRAM_WORKSPACES_DIR to keep data outside the repo, or to point tests elsewhere
 # so they never touch real data.

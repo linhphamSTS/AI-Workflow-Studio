@@ -1,0 +1,5 @@
+# web app runtime (regenerable) — never commit these
+.venv/
+__pycache__/
+*.py[cod]
+workspaces/

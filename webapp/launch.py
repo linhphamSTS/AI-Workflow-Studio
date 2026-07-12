@@ -127,7 +127,7 @@ def _check_claude() -> None:
 def _prewarm_graphviz() -> None:
     """Trigger the skill's own bootstrap so Graphviz is ready before the first render."""
     try:
-        sys.path.insert(0, str(HERE.parent / "skill" / "linhpham-diagram" / "scripts"))
+        sys.path.insert(0, str(HERE.parent / "diagram" / "skill" / "linhpham-diagram" / "scripts"))
         import diagrams_runtime  # noqa: E402
         print("- ensuring Graphviz (downloads a portable copy on first run if missing) ...", flush=True)
         diagrams_runtime.bootstrap()
