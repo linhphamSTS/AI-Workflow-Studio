@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diagram Workflow</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%236366f1'/%3E%3Cg fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='5' y='5' width='6' height='6' rx='1.3'/%3E%3Crect x='14' y='5' width='5' height='5' rx='1.3'/%3E%3Crect x='9' y='15' width='6' height='6' rx='1.3'/%3E%3C/g%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <aside id="sidebar">
+    <div class="brand">
+      <div class="mark">
+        <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="8.5" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v1.5a1 1 0 0 0 1 1H12M17.5 10v1.5a1 1 0 0 1-1 1H12M12 12.5V14"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">Diagram Workflow</div>
+        <div class="brand-sub">SA-grade diagrams, from a prompt</div>
+      </div>
+    </div>
+
+    <button id="new-ws" class="btn primary block">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      New workspace
+    </button>
+
+    <div class="side-list-head"><span>Workspaces</span><span class="count" id="ws-count">0</span></div>
+    <div id="ws-list" class="ws-list"></div>
+
+    <button class="btn ghost sm block help-btn" onclick="App.openHelp()">
+      <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.5 9a2.5 2.5 0 0 1 4.9.6c0 1.7-2.4 2-2.4 3.4M12 17h.01"/></svg>
+      How to use this app
+    </button>
+    <div class="side-foot"><span class="dot-live"></span> Refine via <code>claude</code> CLI · local render</div>
+  </aside>
+
+  <main id="main">
+    <div id="authwarn" class="authwarn hidden"></div>
+    <div id="empty" class="empty">
+      <div class="empty-inner">
+        <div class="empty-art">
+          <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="8.5" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v1.5a1 1 0 0 0 1 1H12M17.5 10v1.5a1 1 0 0 1-1 1H12M12 12.5V14"/></svg>
+        </div>
+        <h1>Turn a prompt into a diagram</h1>
+        <p>Describe what you want — or point at a folder of project docs. It refines your idea into a
+           rigorous spec, you confirm, and it renders a professional diagram you can preview and export.</p>
+        <div class="empty-steps">
+          <span>1 · Describe</span><span>2 · Refine</span><span>3 · Confirm</span><span>4 · Generate</span><span>5 · Export</span>
+        </div>
+        <button class="btn primary lg" onclick="App.newWorkspace()">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          Create your first workspace
+        </button>
+      </div>
+    </div>
+    <div id="ws-view" class="hidden"></div>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Node (logo/icon fetch tooling, if added)
+node_modules/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Scratch / test renders
+/scratch/
+*.tmp
+
+# Graphviz stray source files left next to PNGs
+*.gv
+
+# layout-lint sidecars (transient self-check artifact; only written on a defect)
+*.lint.json
+
+# complex-system end-to-end test output
+/demo/
+
+# web app runtime workspaces (per-user inputs + generated output)
+/webapp/workspaces/
+/webapp/__pycache__/
+/webapp/.venv/

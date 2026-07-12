@@ -1,0 +1,9 @@
+{
+  "name": "linhpham-diagram-tools",
+  "private": true,
+  "type": "module",
+  "description": "Logo fetch tooling for the linhpham-diagram skill (AI/LLM provider icons).",
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}

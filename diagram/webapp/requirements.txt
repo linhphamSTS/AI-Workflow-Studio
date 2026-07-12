@@ -1,0 +1,10 @@
+# Diagram Workflow web app — Python dependencies.
+# Installed automatically into webapp/.venv on first run by launch.py / run.bat.
+fastapi>=0.110
+uvicorn>=0.27
+python-multipart>=0.0.9
+Pillow>=10.0
+python-docx>=1.1
+openpyxl>=3.1
+PyMuPDF>=1.24
+diagrams>=0.23
