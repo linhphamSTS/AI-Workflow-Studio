@@ -4,6 +4,10 @@ A monorepo of reusable Claude Code skills + a shared web app. Each skill lives i
 own folder and deploys independently (a junction/symlink from every local Claude profile
 to the skill source, so editing in the repo updates every profile immediately).
 
+![AI Workflow Studio — the shared web app driving the skills](webapp/static/sample.png)
+
+*AI Workflow Studio — the shared web app: pick a workspace type (diagram or technical proposal), refine, confirm at a gate, generate, keep version history, and export.*
+
 ## Install (once per machine)
 
 One command sets up **everything** — deploys both skills into every Claude profile and

@@ -3,6 +3,8 @@
 A local browser UI over the `linhpham-diagram` skill. One **workspace** per project; each holds
 its own inputs and its own generated output.
 
+![AI Workflow Studio web app](static/sample.png)
+
 ```
 inputs (prompt / uploaded docs / a folder)
   → REFINE    the real skill runs head-less via the `claude` CLI → spec/manifest.json   ⟵ gate
