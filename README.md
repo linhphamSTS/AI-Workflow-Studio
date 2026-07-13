@@ -1,8 +1,26 @@
 # STS Claude Code Workflows
 
-A monorepo of reusable Claude Code skills. Each skill lives in its own folder and
-deploys independently (a junction/symlink from every local Claude profile to the
-skill source, so editing in the repo updates every profile immediately).
+A monorepo of reusable Claude Code skills + a shared web app. Each skill lives in its
+own folder and deploys independently (a junction/symlink from every local Claude profile
+to the skill source, so editing in the repo updates every profile immediately).
+
+## Install (once per machine)
+
+One command sets up **everything** — deploys both skills into every Claude profile and
+prepares the web app (venv + dependencies + Graphviz):
+
+- **Windows:** double-click **`install.bat`** (or `py -3 install.py`)
+- **macOS / Linux:** `./install.sh` (or `python3 install.py`)
+
+Only prerequisite: **Python 3.10+**. (The `claude` CLI is needed at run time for the
+Refine / Analyze / Generate steps; the installer reports whether it's signed in.)
+
+Then start the web app anytime:
+
+- **Windows:** **`run.bat`**   ·   **macOS / Linux:** `./run.sh`   (→ http://127.0.0.1:8000)
+
+Skills also work directly in any Claude Code session: `/linhpham-diagram` and
+`/linhpham-technicalproposal`.
 
 ## Skills
 
