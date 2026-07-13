@@ -34,8 +34,16 @@ manual-only issues.
 4. **Auto-fix loop** (max 2 iterations):
    - For each `auto_fixable` issue in the JSON report, apply the patch via
      `python scripts/auto_fix.py --docx <docx> --issue <issue_id>`.
-   - Re-run Phase 5a to rebuild.
-   - Re-run steps 1-3.
+   - **Do NOT re-run Phase 5a for spacing/formatting auto-fixes** (`image_text_crush`,
+     `heading_section_spacing_tight`, and any patch that only adjusts paragraph
+     spacing). `build_docx.py` regenerates image-paragraph spacing from the template
+     on every build, so re-running 5a *re-introduces* the exact defect `auto_fix.py`
+     just cleared. Instead, apply the patch to the ALREADY-ASSEMBLED docx and go
+     straight to re-rendering + re-review (step 1-3). Only re-run Phase 5a when the
+     fix requires regenerating content/structure (e.g. `techstack_not_table` needs a
+     new `replacements.json` value, or a diagram must be re-rendered) — a content
+     change, not a spacing patch.
+   - Re-run steps 1-3 (render pages, run the reviewer, inspect visually).
    - If after 2 iterations issues remain -> escalate to the user with a
      prioritised list.
 
