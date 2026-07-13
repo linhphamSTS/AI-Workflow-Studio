@@ -43,10 +43,24 @@ def is_claude_profile(path: Path) -> tuple[bool, int, list[str]]:
 
 def find_claude_profiles(verbose: bool = True) -> list[Path]:
     home = Path.home()
-    candidates = sorted(p for p in home.glob(".claude*") if p.is_dir())
+    candidates = [p for p in home.glob(".claude*") if p.is_dir()]
+    # also honor an explicitly-relocated config dir (may live outside home)
+    env_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    if env_dir and Path(env_dir).is_dir():
+        candidates.append(Path(env_dir))
+    # de-duplicate by resolved path (e.g. CLAUDE_CONFIG_DIR that is also a ~/.claude* dir)
+    seen, uniq = set(), []
+    for c in candidates:
+        try:
+            rp = c.resolve()
+        except OSError:
+            continue
+        if rp not in seen:
+            seen.add(rp); uniq.append(c)
+    candidates = sorted(uniq, key=lambda p: str(p))
     profiles: list[Path] = []
     if verbose:
-        print(f"Scanning {home} for .claude* directories...")
+        print(f"Scanning {home} for .claude* directories (+ CLAUDE_CONFIG_DIR if set)...")
     for c in candidates:
         ok, score, found = is_claude_profile(c)
         marker = "OK" if ok else "skip"
