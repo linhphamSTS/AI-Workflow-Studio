@@ -35,7 +35,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 MIN_LONG_SIDE_PX = 1500
-MAX_RENDER_H_IN = 9.0
+MAX_RENDER_H_IN = 9.0        # hard cap: taller than this spills off a Word page
+WORD_TARGET_H_IN = 8.5       # ideal: fit one page AND leave room for the caption
 EMBED_WIDTH_IN = 6.5
 MAX_LABEL_LINE = 24          # chars; a single line longer than this is cramped
 MIN_PNG_BYTES = 3000
@@ -93,6 +94,10 @@ def check_png(png: Path) -> list[dict]:
         issues.append(_issue("blocker", "png_too_tall",
                              f"renders {render_h_in:.1f}in tall at {EMBED_WIDTH_IN}in wide (> {MAX_RENDER_H_IN}in) — "
                              f"switch direction TB<->LR or split the diagram"))
+    elif render_h_in > WORD_TARGET_H_IN:
+        issues.append(_issue("warning", "png_tight_for_word",
+                             f"renders {render_h_in:.1f}in tall at {EMBED_WIDTH_IN}in wide (> {WORD_TARGET_H_IN}in) — "
+                             f"fits a Word page but leaves little room for the caption; consider LR or trimming a node"))
     if dpi and dpi[0] and dpi[0] < 200:
         issues.append(_issue("warning", "png_dpi_meta", f"PNG dpi metadata {dpi[0]} < 200"))
     return issues
@@ -113,7 +118,12 @@ def _labels_from_drawio(root: ET.Element) -> list[tuple[str, str]]:
 def check_drawio(drawio: Path) -> list[dict]:
     issues: list[dict] = []
     if not drawio.exists():
-        return [_issue("blocker", "drawio_missing", f".drawio not found: {drawio.name}")]
+        # Not a blocker: sequence (PIL) and custom-icon diagrams are intentionally
+        # PNG-only. A missing .drawio for a Graphviz/cloud diagram is worth noticing,
+        # so surface it as a warning rather than failing the whole diagram.
+        return [_issue("warning", "drawio_missing",
+                       f".drawio not found: {drawio.name} (expected absent for sequence / "
+                       f"custom-icon diagrams; for Graphviz/cloud diagrams re-emit it)")]
     raw = drawio.read_text(encoding="utf-8", errors="replace")
     try:
         root = ET.fromstring(raw)
@@ -239,6 +249,50 @@ def check_explanation_consistency(drawio_path: Path, entry: dict | None) -> list
     return issues
 
 
+def check_diagram_block(slug: str, entry: dict | None) -> list[dict]:
+    """Warn when the diagrams.json 'block' for a diagram is missing or thin — the
+    caption + intro_paragraph + explanation_bullets that accompany the figure in the
+    deliverable (mirrors the technical-proposal content contract). Warnings only: a quick
+    ad-hoc diagram may legitimately ship without a full block."""
+    issues: list[dict] = []
+    if entry is None:
+        return [_issue("warning", "block_missing",
+                       f"no diagrams.json entry for '{slug}' — no caption / intro / explanation bullets")]
+    caption = (entry.get("caption") or "").strip()
+    if not caption:
+        issues.append(_issue("warning", "caption_missing", f"'{slug}' has no caption"))
+    elif "—" not in caption and " - " not in caption:
+        issues.append(_issue("warning", "caption_format",
+                             f"caption should read '<Type> — <Scope>': {caption[:60]!r}"))
+    if not (entry.get("intro_paragraph") or "").strip():
+        issues.append(_issue("warning", "intro_missing", f"'{slug}' has no intro_paragraph"))
+    bullets = entry.get("explanation_bullets") or []
+    if len(bullets) < 3:
+        issues.append(_issue("warning", "bullets_sparse",
+                             f"'{slug}' has {len(bullets)} explanation bullet(s) (< 3) — thin for a professional block"))
+    return issues
+
+
+def check_layout_lint(lint_path: Path) -> list[dict]:
+    """Surface the manual-grid renderer's own layout self-check. build_cloud.render()
+    writes <slug>.lint.json ONLY when it detects a text-overflow or label-overlap
+    defect (measured with the real fonts + coordinates it drew with — far more
+    reliable than inspecting pixels here). Its presence therefore means a real,
+    zero-tolerance layout defect: header text crossing a boundary, or an edge label
+    landing on a node/header label. Promote each to a BLOCKER."""
+    if not lint_path.exists():
+        return []
+    try:
+        items = json.loads(lint_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return [_issue("warning", "lint_unreadable", f"could not read {lint_path.name}")]
+    out: list[dict] = []
+    for it in items or []:
+        out.append(_issue("blocker", it.get("code", "layout_defect"),
+                          it.get("msg", "layout defect reported by build_cloud lint")))
+    return out
+
+
 def run(dir_path: Path) -> Report:
     rep = Report()
     inv = {}
@@ -256,6 +310,8 @@ def run(dir_path: Path) -> Report:
         issues = check_png(png)
         issues += check_drawio(png.with_suffix(".drawio"))
         issues += check_explanation_consistency(png.with_suffix(".drawio"), inv.get(slug))
+        issues += check_diagram_block(slug, inv.get(slug))
+        issues += check_layout_lint(png.with_suffix(".lint.json"))
         rep.add(slug, issues)
     return rep
 

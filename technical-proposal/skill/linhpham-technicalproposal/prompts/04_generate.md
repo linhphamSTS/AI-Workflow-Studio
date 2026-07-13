@@ -71,7 +71,93 @@ Conventions:
     the template so the writing voice stays consistent across the doc.
 - No marketing language. Same Senior-SA voice as Problems & Solutions.
 
-### How to render (preferred — DO use this)
+### How to render — PRIMARY: the deterministic SA-grade renderers (DO use these first)
+
+Render each diagram with the skill's dedicated renderers in `scripts/`. They are
+deterministic (you author a `spec.json`; they draw it) and they BAKE IN the senior-SA
+structure — nested trust boundaries, a legend, per-tier colour hierarchy, `wrap_label`
+(no orphaned "("), orthogonal + skip-edge routing, arrow anti-overlap, 300 DPI, and the
+Word aspect cap — and they emit a NATIVE per-component-editable `.drawio` + an `.svg`
+twin automatically. **You do NOT hand-code layout or call `export_drawio` yourself** —
+each renderer writes `<slug>.png` + `<slug>.svg` + `<slug>.drawio` (+ `<slug>.lint.json`)
+in one shot. Pick the renderer by diagram family:
+
+**1. Cloud / infra / architecture / K8s / on-prem / CI-CD / data-pipeline / microservices
+→ `scripts/build_cloud.py`** (manual-grid, brochure-grade). Author a `spec.json`:
+
+```json
+{
+  "title": "AWS Reference Architecture — Multi-AZ",
+  "legend": true,
+  "columns": [
+    {"id": "edge", "boundary": {"label": "Edge / Global", "fill": "#FFF8E1", "stroke": "#F9A825"},
+     "nodes": [{"id": "dns", "label": "Route 53", "icon": "aws/route-53"},
+               {"id": "waf", "label": "AWS WAF",  "icon": "aws/waf"}]},
+    {"id": "data", "boundary": {"label": "Data Subnets (Multi-AZ)", "fill": "#E7F0FA", "stroke": "#1E88E5"},
+     "nodes": [{"id": "aur", "label": "Aurora primary", "icon": "aws/aurora", "tags": ["SoR"]}]}
+  ],
+  "wraps":  [{"label": "VPC 10.0.0.0/16", "stroke": "#8C4FFF", "dashed": true,
+              "icon": "aws/vpc", "cols": ["edge", "data"]}],
+  "shared": {"label": "Security & Observability (account-scoped)", "fill": "#FDECEA", "stroke": "#DD344C",
+             "anchor": {"from": "data", "label": "IAM / KMS / TLS / metrics"},
+             "nodes": [{"id": "iam", "label": "IAM", "icon": "aws/identity-and-access-management"}]},
+  "edges":  [{"from": "waf", "to": "aur", "label": "HTTPS"},
+             {"from": "aur", "to": "aur2", "label": "replication", "style": "dashed", "color": "#2E7D32"}]
+}
+```
+- `columns[]` = tiers left→right; each has an optional `boundary{label,fill,stroke,icon,dashed}`
+  (the subnet box) and `nodes[]{id,label,icon,tech?,tags?}`.
+- `wraps[]{label,fill,stroke,dashed,icon,cols[]}` = a boundary (VPC / VNet) spanning a
+  contiguous range of columns → this is what gives the VPC⊃subnet NESTING.
+- `shared{label,fill,stroke,anchor{from,label},nodes[]}` = the bottom cross-cutting band
+  (IAM / KMS / observability), linked by ONE anchor edge (never a per-icon spider-web).
+- `edges[]{from,to,label?,style?("dashed"),color?}`; `"legend": true` draws the sync/async legend.
+- Icons are `provider/stem` refs (`aws/aurora`, `azure/aks`, `gcp/gke`, `ai/openai`,
+  `network/...`, `container/...`, `generic/...`). The renderer maps each to a native draw.io
+  vendor stencil where one exists, else embeds the icon PNG as an individually-editable cell.
+- **13 ready-made canonical specs live in `scripts/cloud_specs.py`** (`aws_ref`, `azure_ref`,
+  `gcp_ref`, `onprem_hybrid`, `k8s_topology`, `docker_compose`, `cicd`, `data_pipeline`,
+  `gitops`, `microservices`, `c4_container`, `uml_deployment`, `ai_rag`) — start from the one
+  matching Phase 2's cloud and adapt names/edges to THIS project.
+
+Render: `python scripts/build_cloud.py --spec <slug>.spec.json --out project_dir/output/diagrams/<slug>.png`
+
+**2. Notation diagrams (flowchart, decision tree, state machine, ERD, UML class,
+C4 context/container, DFD, org chart, mind map, network, swimlane) → `scripts/build_graph.py`**
+(Graphviz, correct ISO / UML shapes — diamond decision, ellipse start, cylinder datastore):
+
+```json
+{"slug": "order_flow", "title": "Order Processing Flow", "diagram_type": "flowchart",
+ "engine": "dot", "direction": "TB",
+ "nodes": [{"id": "s", "label": "Start", "role": "start"},
+           {"id": "p", "label": "Payment OK?", "role": "decision"},
+           {"id": "db", "label": "Orders", "role": "datastore"}],
+ "edges": [{"from": "s", "to": "p"}, {"from": "p", "to": "ship", "label": "yes"}],
+ "clusters": [{"id": "sw", "label": "Customer", "members": ["s"]}]}
+```
+`role` picks the shape (start=ellipse, process=rounded box, decision=diamond,
+datastore=cylinder…); ERD uses `"type":"entity"` + `attributes[]`, class uses `"type":"class"`
++ `fields[]`/`methods[]`; `edge.kind` (`async`/`inheritance`/`composition`…) picks the arrow;
+one level of `clusters` nesting via `parent`.
+Render: `python scripts/build_graph.py --spec <slug>.spec.json --out project_dir/output/diagrams/<slug>.png`
+→ PNG + SVG + native `.drawio`.
+
+**3. UML sequence diagrams → `scripts/build_sequence.py`** — spec keys `participants[]`,
+`messages[]` (sync / async / return / self), `fragments[]` (alt / opt / loop), `title`
+(PNG only; sequence shapes don't round-trip to `.drawio`).
+Render: `python scripts/build_sequence.py --spec <slug>.spec.json --out project_dir/output/diagrams/<slug>.png`
+
+> **RENDER IN THE CLOUD CHOSEN IN PHASE 2 — never default to AWS.** Use the icon provider
+> matching Phase-2's stack (`aws/*`, `azure/*`, `gcp/*`, or `container/*`+`network/*` for
+> on-prem K8s). Using AWS icons for an Azure / GCP decision is a REJECT.
+
+These renderers already apply the nesting + legend + colour-hierarchy + `wrap_label` + ortho /
+skip-edge routing + arrow anti-overlap + aspect + DPI rules described in the rest of this section
+and the SA Charter below — so you do NOT re-implement them; you author a faithful `spec.json`,
+render, then run the self-check. The `.drawio` + `.svg` come out automatically. Only reach for the
+mingrammer fallback below if a diagram genuinely does not fit any of the three renderers above.
+
+### Fallback — mingrammer `diagrams` DSL (only if a diagram doesn't fit the primary renderers above)
 
 Use the **`diagrams` Python package** (mingrammer/diagrams) together with
 **Graphviz** as the layout engine. The package bundles 500+ real AWS / 800+
@@ -334,9 +420,14 @@ rendering, then verify after render:
    >= 1500px, renders <= 9.0in tall at 6.5in wide) and the `.drawio`
    (well-formed XML, has nodes/edges, no blank boxes, **no label line
    ending on "("**, no over-long single-line label, line breaks preserved
-   as `&#10;`). **Fix every blocker and re-render until it reports 0
-   blockers.** Do NOT hand off to Phase 5 with blockers outstanding;
-   treat warnings as a strong nudge to shorten/wrap a label.
+   as `&#10;`). It also promotes `build_cloud`'s layout lint —
+   `header_overflow` and `label_overlap` (read from `<slug>.lint.json`) — to
+   **blockers**, and warns on a VPC/subnet diagram whose boundaries are flat
+   (`flat_boundaries`), a missing/ill-formed caption or intro, and any
+   `explanation_bullets` term that names a component absent from the diagram
+   (`explanation_orphan`). **Fix every blocker and re-render until it reports
+   0 blockers.** Do NOT hand off to Phase 5 with blockers outstanding; treat
+   warnings as a strong nudge to shorten/wrap a label.
 
 The agent ALSO re-opens each PNG with PIL to eyeball the densest cluster.
 Re-render until the self-check is clean and the crop looks right.

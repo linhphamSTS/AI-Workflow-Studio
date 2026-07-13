@@ -129,7 +129,7 @@ def _ensure_diagrams_package() -> None:
     try:
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "--quiet", "--user", "diagrams"],
-            check=True,
+            check=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"pip install diagrams failed: {e}") from e
@@ -170,7 +170,7 @@ def _ensure_icon_resources() -> None:
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "--user",
              "--force-reinstall", "--no-deps", "diagrams"],
-            check=True,
+            check=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.CalledProcessError as e:
         print(f"[diagrams_runtime] ! reinstall failed: {e}", file=sys.stderr)

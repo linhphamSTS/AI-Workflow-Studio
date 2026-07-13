@@ -471,7 +471,8 @@ def _graphviz_layout(nodes, edges, clusters, direction):
 
     try:
         res = subprocess.run([dot, "-Tjson"], input=source,
-                             capture_output=True, text=True, timeout=60)
+                             capture_output=True, text=True, timeout=60, encoding="utf-8",
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except Exception:
         return None
     if res.returncode != 0:
