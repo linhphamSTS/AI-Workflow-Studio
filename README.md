@@ -1,8 +1,9 @@
-# STS Claude Code Workflows
+# AI Workflow Studio
 
-A monorepo of reusable Claude Code skills + a shared web app. Each skill lives in its
-own folder and deploys independently (a junction/symlink from every local Claude profile
-to the skill source, so editing in the repo updates every profile immediately).
+A monorepo of reusable Claude Code skills plus a shared local web app ("AI Workflow
+Studio") that drives them. Each skill lives in its own folder and deploys independently
+(a junction/symlink from every local Claude profile to the skill source, so editing in
+the repo updates every profile immediately).
 
 ![AI Workflow Studio — the shared web app driving the skills](webapp/static/sample.png)
 
@@ -42,11 +43,12 @@ senior-SA-grade diagram (sharp PNG + editable `.drawio` + `.docx`).
 
 Deploy: `cd diagram && python tools/deploy.py`
 
-### `webapp/` — the shared web app
-A local browser UI over the skills: workspaces, a refine gate, generate, version
-history/compare, and export. Today it drives the **diagram** skill; it is placed at
-the top level (beside both skills) so it can also drive the **technical-proposal**
-workflow from the same UI.
+### `webapp/` — the shared web app ("AI Workflow Studio")
+A local browser UI over the skills. When you create a workspace you pick its type
+(**diagram** or **technical proposal**), then: refine/analyze → confirm at a gate →
+generate → version history/compare → export. It drives **both** skills head-less via
+the `claude` CLI, and sits at the top level (beside both skills) so future skills can
+plug into the same UI.
 
 Run: `python webapp/launch.py` (or `webapp/run.bat` / `webapp/run.sh`) → http://127.0.0.1:8000
 
@@ -56,7 +58,7 @@ Run: `python webapp/launch.py` (or `webapp/run.bat` / `webapp/run.sh`) → http:
 .
 ├─ technical-proposal/   # /linhpham-technicalproposal skill + tools + templates
 ├─ diagram/              # /linhpham-diagram skill + tools
-└─ webapp/               # shared local web app over the skills (diagram now, proposal next)
+└─ webapp/               # "AI Workflow Studio" — shared local web app over both skills
 ```
 
 Each skill folder keeps its own `deploy.*`, `.gitignore`, and `LESSONS_LEARNED.md`,

@@ -1,23 +1,28 @@
-# Diagram-WorkFlow — Web App
+# AI Workflow Studio — Web App
 
-A local browser UI over the `linhpham-diagram` skill. One **workspace** per project; each holds
-its own inputs and its own generated output.
+A local browser UI over the STS Claude Code skills — the **diagram** skill and the
+**technical-proposal** skill (more to come). One **workspace** per project; each holds its
+own inputs and its own generated output, and you pick the workspace type (diagram or
+technical proposal) when you create it.
 
 ![AI Workflow Studio web app](static/sample.png)
 
 ```
-inputs (prompt / uploaded docs / a folder)
-  → REFINE    the real skill runs head-less via the `claude` CLI → spec/manifest.json   ⟵ gate
-  → confirm / edit the spec in the browser
-  → GENERATE  deterministic local Python renderers → output/diagrams/*.png .svg .drawio .docx
-  → PREVIEW   view PNGs; iterate (edit prompt/spec, re-run) until happy
-  → EXPORT    download a zip of the output folder
+inputs (a prompt, uploaded docs, or a folder)
+  → REFINE / ANALYZE   the real skill runs head-less via the `claude` CLI → spec / plan   ⟵ gate
+  → confirm / edit the spec or plan in the browser
+  → GENERATE   diagram  = fast local Python renderers → PNG · .svg · .drawio · .docx
+               proposal = the skill's full Phase 4-6 → a SharePoint-ready .docx + diagrams
+  → PREVIEW    view the output; iterate (edit inputs/plan, re-run) until happy
+  → EXPORT     download a zip of the output folder (or just the .docx)
 ```
 
-**Refine** is the only LLM step — it shells out to the installed `claude` CLI (no API key needed),
-so the actual skill logic does the classification + spec refinement, then stops at the gate.
-**Generate** is pure Python (fast, no LLM) using the skill's `build_cloud` / `build_graph` /
-`build_sequence` / `build_diagram_doc` / `diagram_check` scripts.
+**Refine / Analyze** is the LLM step — it shells out to the installed `claude` CLI (no API key
+needed), so the actual skill logic does the classification / analysis, then stops at a confirmation
+gate. **Generate** for a *diagram* is pure Python (fast, no LLM) using the skill's `build_cloud` /
+`build_graph` / `build_sequence` / `build_diagram_doc` / `diagram_check` scripts; for a *technical
+proposal* it runs the skill's full generate → assemble → strict format-review pipeline (a longer
+`claude` run) and produces the `.docx`.
 
 ## Run — one command, self-installing
 
