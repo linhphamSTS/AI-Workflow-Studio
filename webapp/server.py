@@ -53,12 +53,15 @@ STATIC_DIR = WEBAPP_DIR / "static"
 REFINE_PROMPT_TMPL = WEBAPP_DIR / "refine_prompt.md"
 PROPOSAL_ANALYZE_TMPL = WEBAPP_DIR / "proposal_analyze_prompt.md"
 PROPOSAL_GENERATE_TMPL = WEBAPP_DIR / "proposal_generate_prompt.md"
+DIAGRAM_SELFLEARN_TMPL = WEBAPP_DIR / "diagram_selflearn_prompt.md"
 
 WORKSPACES_DIR.mkdir(parents=True, exist_ok=True)
 
 CLAUDE = shutil.which("claude") or "claude"
 REFINE_MODEL = os.environ.get("DIAGRAM_REFINE_MODEL", "").strip()
 REFINE_TIMEOUT = int(os.environ.get("DIAGRAM_REFINE_TIMEOUT", "900"))   # seconds
+DIAGRAM_SELFLEARN = os.environ.get("DIAGRAM_SELFLEARN", "1") == "1"     # skill self-learns after a web render
+DIAGRAM_SELFLEARN_TIMEOUT = int(os.environ.get("DIAGRAM_SELFLEARN_TIMEOUT", "600"))
 PROPOSAL_ANALYZE_TIMEOUT = int(os.environ.get("PROPOSAL_ANALYZE_TIMEOUT", "1200"))    # 20 min
 PROPOSAL_GENERATE_TIMEOUT = int(os.environ.get("PROPOSAL_GENERATE_TIMEOUT", "3600"))  # 60 min (heavy)
 RENDER_TIMEOUT = int(os.environ.get("DIAGRAM_RENDER_TIMEOUT", "180"))   # per diagram
@@ -520,12 +523,41 @@ def generate_job(ws_id: str):
         write_meta(ws_id, meta)
         job_log(ws_id, f"OK generate v{vid} -> {n_ok}/{len(results)} rendered, "
                        f"{check.get('blockers',0)} blocker(s)")
+        # skill self-learning (best-effort): the diagram is already delivered above; now let the
+        # skill run its OWN Phase 4-5 self-learn over the render so it improves over time. Never
+        # fails the generate. Off with DIAGRAM_SELFLEARN=0.
+        _diagram_selflearn(ws_id, out)
     except Exception as e:  # noqa: BLE001
         set_status(ws_id, "error", error=f"generate failed: {e}")
         job_log(ws_id, f"! {e}")
     finally:
         with JOBS_LOCK:
             JOBS.get(ws_id, {})["running"] = False
+
+
+def _diagram_selflearn(ws_id: str, out_dir: Path) -> None:
+    """Run the diagram skill's OWN Phase 4-5 (self-check + self-learn) over a finished render,
+    so it appends a lesson to its LESSONS_LEARNED via its native mechanism. Best-effort."""
+    if not DIAGRAM_SELFLEARN:
+        return
+    if not (shutil.which("claude") and _claude_health()["logged_in"]):
+        return
+    try:
+        d = WORKSPACES_DIR / ws_id
+        fwd = lambda p: str(p).replace("\\", "/")
+        prompt = (DIAGRAM_SELFLEARN_TMPL.read_text(encoding="utf-8")
+                  .replace("{{SKILL_DIR}}", fwd(SKILL_DIR))
+                  .replace("{{OUTPUT_DIR}}", fwd(out_dir))
+                  .replace("{{WORKSPACE_DIR}}", fwd(d)))
+        job_log(ws_id, "  [skill self-learn: running the diagram skill's own Phase 4-5 over the render]")
+        subprocess.run([CLAUDE, "-p", prompt, "--output-format", "json",
+                        "--permission-mode", "bypassPermissions", "--add-dir", str(SKILL_DIR)],
+                       cwd=str(d), env=_child_env(), **_hidden_console(),
+                       capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       timeout=DIAGRAM_SELFLEARN_TIMEOUT)
+        job_log(ws_id, "  [skill self-learn: done]")
+    except Exception as e:  # noqa: BLE001
+        job_log(ws_id, f"  (self-learn skipped: {e})")
 
 
 def start_job(ws_id: str, phase: str, target):

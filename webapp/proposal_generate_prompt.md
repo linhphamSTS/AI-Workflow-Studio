@@ -36,9 +36,12 @@ strict format review, SharePoint-Online compatibility, heading spacing, no lefto
    diagrams. Write the result to `{{OUTPUT_DIR}}/`.
 3. `{{PROPOSAL_SKILL_DIR}}/prompts/05b_format_review.md` — run `format_reviewer.py` + the `auto_fix.py`
    loop (max 2 iterations) until 0 blockers, as that prompt specifies.
-4. `{{PROPOSAL_SKILL_DIR}}/prompts/06_report.md` — for the report step, DO NOT append to the skill's
-   own `LESSONS_LEARNED.md` (that would modify the skill). Instead write a short run summary to
-   `{{OUTPUT_DIR}}/_report.md`.
+4. `{{PROPOSAL_SKILL_DIR}}/prompts/06_report.md` — run the report step INCLUDING the skill's own
+   **self-learning**: append a lesson entry to `{{PROPOSAL_SKILL_DIR}}/LESSONS_LEARNED.md` exactly
+   as that phase and the file's own rules describe. This is the skill's BUILT-IN mechanism — use it,
+   do not invent a separate lessons store. Add an entry only if this run surfaced something reusable
+   (a real fix, a gotcha, a good decision); if nothing new, don't pad it. Also write a short run
+   summary to `{{OUTPUT_DIR}}/_report.md`.
 
 ## OUTPUT (all under `{{OUTPUT_DIR}}/`)
 
