@@ -1,5 +1,5 @@
 @echo off
-REM Diagram Workflow - one-click launcher (Windows).
+REM AI Workflow Studio - one-click launcher (Windows).
 REM First run installs everything into webapp\.venv, then starts the app.
 cd /d "%~dp0"
 

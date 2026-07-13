@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-One-command launcher for the Diagram Workflow web app.
+One-command launcher for the AI Workflow Studio web app.
 
 Move the repo to any machine and just run this (or `run.bat` / `run.sh`). On the
 first run it is fully self-installing:
@@ -166,7 +166,7 @@ def main() -> int:
         threading.Timer(2.0, lambda: webbrowser.open(url)).start()
     except Exception:  # noqa: BLE001
         pass
-    print(f"\n  >  Diagram Workflow  ->  {url}   (press Ctrl+C to stop)\n", flush=True)
+    print(f"\n  >  AI Workflow Studio  ->  {url}   (press Ctrl+C to stop)\n", flush=True)
 
     import runpy
     try:

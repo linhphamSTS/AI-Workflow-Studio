@@ -1,4 +1,4 @@
-/* Diagram Workflow SPA — vanilla JS, no build step. */
+/* AI Workflow Studio SPA — vanilla JS, no build step. */
 const App = (() => {
   let current = null, detail = null, manifest = null, pollTimer = null, pendingFiles = [];
   let selVer = null, cmpMode = false, cmpA = null, cmpB = null, folderName = '', histView = false, planCache = null;
@@ -92,7 +92,7 @@ const App = (() => {
     const stepHTML = steps.map((s, i) => `<div class="help-step"><div class="hs-n">${ic(s[0])}</div>
       <div><div class="hs-t">${i + 1}. ${s[1]}</div><div class="hs-b">${s[2]}</div></div></div>`).join('');
     const ov = el(`<div class="modal-ov"><div class="modal wide">
-      <div class="modal-head"><div class="mi">${ic('info')}</div><h3>How to use Diagram Workflow</h3></div>
+      <div class="modal-head"><div class="mi">${ic('info')}</div><h3>How to use AI Workflow Studio</h3></div>
       <div class="modal-body help-body">
         <p>Turn a plain-language idea into a senior-SA-grade <b>diagram</b>, or a folder of RFP docs into a full <b>technical proposal .docx</b> — analysed, confirmed by you at a gate, generated, versioned, and exportable. The steps below apply to both (a proposal analyses a document folder instead of a prompt, and produces a .docx).</p>
         <div class="help-steps">${stepHTML}</div>

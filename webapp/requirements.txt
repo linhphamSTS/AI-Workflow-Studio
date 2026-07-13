@@ -1,4 +1,4 @@
-# Diagram Workflow web app — Python dependencies.
+# AI Workflow Studio web app — Python dependencies.
 # Installed automatically into webapp/.venv on first run by launch.py / run.bat.
 fastapi>=0.110
 uvicorn>=0.27

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Diagram Workflow — one-command launcher (macOS / Linux).
+# AI Workflow Studio — one-command launcher (macOS / Linux).
 # First run installs everything into webapp/.venv, then starts the app.
 cd "$(dirname "$0")" || exit 1
 
