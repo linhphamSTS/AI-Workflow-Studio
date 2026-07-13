@@ -277,15 +277,15 @@ const App = (() => {
     const isProp = detail.type === 'proposal';
     return `<div class="card">
       <div class="card-head"><div class="hi">${ic(isProp ? 'doc2' : 'edit')}</div><div>
-        <h3>${isProp ? 'Add the project docs' : 'Describe the diagram'}</h3>
-        <div class="sub">${isProp ? 'Upload a folder of the RFP + supporting docs (required). The skill analyses them and proposes a stack + architecture.' : 'A plain-language idea, uploaded docs, or a folder — anything works.'}</div></div></div>
+        <h3>${isProp ? 'Describe the project (or add docs)' : 'Describe the diagram'}</h3>
+        <div class="sub">${isProp ? 'Describe the requirements in your own words, or upload a folder of RFP + supporting docs — either works. The skill analyses them and proposes a stack + architecture.' : 'A plain-language idea, uploaded docs, or a folder — anything works.'}</div></div></div>
       <div class="card-body">
         <div class="field">
-          <label>${isProp ? 'Extra context' : 'Prompt'} <span class="hint">${isProp ? 'optional — anything to steer the proposal (constraints, preferences)' : 'plain language — it gets refined into a proper spec'}</span></label>
-          <textarea id="in-prompt" rows="${isProp ? 3 : 4}" placeholder="${isProp ? 'e.g. must stay in the client’s AWS account · budget-sensitive · they prefer .NET' : 'e.g. our AWS setup for a ride-hailing backend · the checkout sequence with the payment gateway · the order lifecycle state machine'}">${esc(detail.prompt || '')}</textarea>
+          <label>${isProp ? 'Project / requirements' : 'Prompt'} <span class="hint">${isProp ? 'the RFP in your own words (used as-is if you don’t add docs), or extra context if you do' : 'plain language — it gets refined into a proper spec'}</span></label>
+          <textarea id="in-prompt" rows="${isProp ? 5 : 4}" placeholder="${isProp ? 'e.g. Multi-tenant compliance SaaS on Azure for ~400 institutional clients. Self-service tenant onboarding &lt;4h, per-region data residency, 99.95% API SLA, 10-year tamper-evident audit. Client mandates Azure + Java, existing Azure DevOps.' : 'e.g. our AWS setup for a ride-hailing backend · the checkout sequence with the payment gateway · the order lifecycle state machine'}">${esc(detail.prompt || '')}</textarea>
         </div>
         <div class="field">
-          <label>${isProp ? 'Project docs (RFP + supporting) — required' : 'Add project docs'} <span class="hint">${isProp ? '.pdf .docx .doc .txt .md .xlsx' : 'optional — .md .txt .pdf .docx .xlsx (ingested &amp; analysed like an RFP)'}</span></label>
+          <label>${isProp ? 'Project docs (RFP + supporting)' : 'Add project docs'} <span class="hint">${isProp ? 'optional — .pdf .docx .doc .txt .md .xlsx (recommended for a richer proposal)' : 'optional — .md .txt .pdf .docx .xlsx (ingested &amp; analysed like an RFP)'}</span></label>
           <div class="drop" id="drop">${ic('upload')}<div class="big">Drag files here</div><div class="small">or use the buttons below</div></div>
           <input type="file" id="filepick" multiple style="display:none">
           <input type="file" id="folderpick" webkitdirectory directory multiple style="display:none">

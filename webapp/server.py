@@ -273,9 +273,21 @@ def analyze_job(ws_id: str):
         meta = read_meta(ws_id)
         d = WORKSPACES_DIR / ws_id
         (d / "spec").mkdir(parents=True, exist_ok=True)
+        inp = d / "inputs"
+        has_docs = (inp.exists() and any(inp.iterdir())) or (meta.get("folder") and Path(meta["folder"]).exists())
+        # WORKAROUND (skill is read-only + needs a doc folder to ingest): if the user gave only a
+        # prompt and no docs, capture the prompt as a requirements doc so the skill has something to
+        # analyse. This is entirely webapp-side — the tech-proposal skill is never modified.
+        if not has_docs and (meta.get("prompt") or "").strip():
+            inp.mkdir(parents=True, exist_ok=True)
+            (inp / "requirements.md").write_text(
+                "# Project requirements\n\n"
+                "_(Provided directly as a prompt; no source RFP documents were supplied.)_\n\n"
+                + meta["prompt"].strip() + "\n", encoding="utf-8")
+            job_log(ws_id, "  (no docs supplied — captured your prompt as inputs/requirements.md for the skill to analyse)")
         sources = []
-        if (d / "inputs").exists() and any((d / "inputs").iterdir()):
-            sources.append(d / "inputs")
+        if inp.exists() and any(inp.iterdir()):
+            sources.append(inp)
         if meta.get("folder") and Path(meta["folder"]).exists():
             sources.append(Path(meta["folder"]))
         if sources:
@@ -676,12 +688,12 @@ def pick_folder():
 def refine(ws_id: str):
     meta = read_meta(ws_id)
     is_proposal = meta.get("type") == "proposal"
-    has_folder = bool(meta.get("folder")) or bool(list((WORKSPACES_DIR / ws_id / "inputs").glob("*")))
-    if is_proposal and not has_folder:
-        raise HTTPException(400, "A technical proposal needs source docs: upload a folder of RFP + "
-                                 "supporting docs, or point at a folder on this machine.")
-    if not is_proposal and not (meta.get("prompt") or has_folder):
-        raise HTTPException(400, "nothing to refine: add a prompt, upload files, or set a folder")
+    has_docs = bool(meta.get("folder")) or bool(list((WORKSPACES_DIR / ws_id / "inputs").glob("*")))
+    has_prompt = bool((meta.get("prompt") or "").strip())
+    if not has_docs and not has_prompt:
+        raise HTTPException(400, "Nothing to work from: add a prompt, upload files, or set a folder."
+                                 + (" (A proposal is best with RFP docs, but a detailed prompt works too — "
+                                    "we capture it as a requirements doc for the skill.)" if is_proposal else ""))
     h = _claude_health()
     if not h["claude_installed"]:
         raise HTTPException(400, "The 'claude' CLI is not installed. Install Claude Code, then reload. "
