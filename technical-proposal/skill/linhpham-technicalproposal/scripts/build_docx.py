@@ -1481,10 +1481,69 @@ def validate_template_placeholders(template: Path, replacements: dict) -> None:
         )
 
 
+def validate_template_image_headings(template: Path) -> None:
+    """Fail loudly if the template embeds an image inside a Heading-styled (or
+    outline-levelled) body paragraph.
+
+    Root cause of the "template images leak into the Table of Contents on
+    SharePoint" bug (see LESSONS_LEARNED 2026-07-13): the template's TOC field
+    collects entries BY STYLE NAME (``TOC \\t "Heading 1,1,...,Heading 6,6,"``)
+    and by applied outline level (``\\u``). An image sitting in a Heading-styled
+    paragraph — even an empty one — therefore becomes a TOC entry, so the image
+    gets pulled into the mục lục when Word/SharePoint updates fields. Figure and
+    decorative images must live in Normal (non-Heading) paragraphs with direct
+    centering/spacing; skill-inserted diagrams already do, which is why only
+    template-embedded images were ever affected.
+
+    Only ``word/document.xml`` is scanned (headers/footers are not collected by a
+    TOC). This runs on the TEMPLATE, before skill diagrams are inserted, so it
+    never false-positives on generated figures.
+    """
+    import xml.etree.ElementTree as ET
+    W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    with zipfile.ZipFile(template) as zf:
+        try:
+            sroot = ET.fromstring(zf.read("word/styles.xml").decode("utf-8", "ignore"))
+            sid_name = {}
+            for st in sroot.iter(W + "style"):
+                nm = st.find(W + "name")
+                sid_name[st.get(W + "styleId")] = (nm.get(W + "val").lower() if nm is not None else "")
+        except (KeyError, ET.ParseError):
+            sid_name = {}
+        try:
+            droot = ET.fromstring(zf.read("word/document.xml").decode("utf-8", "ignore"))
+        except (KeyError, ET.ParseError):
+            return
+    offenders = 0
+    for p in droot.iter(W + "p"):
+        if p.find(".//" + W + "drawing") is None and p.find(".//" + W + "pict") is None:
+            continue
+        ppr = p.find(W + "pPr")
+        if ppr is None:
+            continue
+        ps = ppr.find(W + "pStyle")
+        style_name = sid_name.get(ps.get(W + "val"), "") if ps is not None else ""
+        ol = ppr.find(W + "outlineLvl")
+        ol_val = int(ol.get(W + "val")) if ol is not None else None
+        if style_name.startswith("heading") or (ol_val is not None and ol_val < 9):
+            offenders += 1
+    if offenders:
+        raise SystemExit(
+            f"! Template has {offenders} image paragraph(s) in a Heading style / "
+            "outline level.\n  The TOC field collects by style name "
+            '(\\t "Heading 1,1,...,Heading 6,6,"), so those images leak into the Table '
+            "of Contents when SharePoint/Word updates fields.\n  Demote each image "
+            "paragraph to Normal (keep its direct centering/spacing so the image stays "
+            "put but is excluded from the TOC). See LESSONS_LEARNED 2026-07-13."
+        )
+
+
 def build(template: Path, replacements: dict, diagrams: list, out: Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     # Guard: every non-empty content key must have a {{KEY}} slot in the template.
     validate_template_placeholders(template, replacements)
+    # Guard: no template image may sit in a Heading paragraph (it would leak into the TOC).
+    validate_template_image_headings(template)
     shutil.copyfile(template, out)
 
     doc = Document(str(out))
