@@ -229,6 +229,15 @@ def render(spec: dict, out: Path) -> Path:
             _centered(d, lx, y - 26, label, f_msg)
 
     out.parent.mkdir(parents=True, exist_ok=True)
+    # Sharpness for Word: build_docx.py embeds every figure at width = 6.5in, so a narrow
+    # sequence (few participants) would land below 300 DPI at that width and look soft.
+    # Scale up to the 300-DPI target with high-quality resampling so Word displays it 1:1
+    # (crisper than letting Word upscale a small PNG), then keep 300-dpi metadata.
+    TARGET_W = 1950  # 300 DPI at Word's 6.5in embed width
+    if width < TARGET_W:
+        new_h = round(height * TARGET_W / width)
+        img = img.resize((TARGET_W, new_h), Image.LANCZOS)
+        width, height = TARGET_W, new_h
     img.save(out, format="PNG", optimize=False, dpi=(300, 300))
     print(f"Rendered {out}  ({width}x{height} @ 300 DPI)")
     return out

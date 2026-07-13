@@ -405,8 +405,13 @@ rendering, then verify after render:
    - If still too tall, split the diagram into 2 figures (e.g.
      "Reference Architecture — Compute & Network" + "— Data & Audit").
      NEVER drop content to make it fit.
-5. **Sharpness.** `graph_attr["dpi"] = "300"`. PNG must be ≥ 1500 px on
-   its long side. Verify after render via PIL.
+5. **Sharpness (must be crisp in Word, never blurry).** `graph_attr["dpi"] = "300"`.
+   Because `build_docx.py` embeds every figure at width = 6.5in, the PNG must be
+   **≥ 1950 px wide** (= 300 DPI at 6.5in) — not merely ≥ 1500 px on the long side —
+   or Word upscales it and it looks soft. Save the PNG with `dpi=(300, 300)` metadata.
+   The PRIMARY renderers (`build_cloud` / `build_graph` / `build_sequence`) already
+   guarantee this; on this fallback path, raise `dpi` and re-render (or up-render) until
+   the width clears 1950 px, then verify via PIL. The self-check blocks `png_soft_for_embed`.
 
 6. **Mandatory self-check — run after rendering ALL diagrams.** This is the
    per-diagram verification gate the user asked for:
