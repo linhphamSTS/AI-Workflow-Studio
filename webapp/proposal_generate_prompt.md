@@ -5,11 +5,14 @@ already confirmed by the user (in `plan.json`). Run the skill's **Phase 4 → 6*
 proposal: draw the diagrams, assemble the `.docx`, run the strict format review + auto-fix, and
 deliver. No user questions (everything needed is in `plan.json`).
 
-## HARD RULE — do not modify the skill
+## HARD RULE — do not modify the skill (except its self-learning memory)
 
-The skill lives read-only at `{{PROPOSAL_SKILL_DIR}}`. **Read** its phase prompts + run its scripts,
-but **NEVER create, edit, or delete any file under that folder.** All new files go under
-`{{OUTPUT_DIR}}/`.
+The skill lives at `{{PROPOSAL_SKILL_DIR}}`. **Read** its phase prompts + run its scripts, and put all
+new run output under `{{OUTPUT_DIR}}/`. You may write to the skill folder ONLY for self-learning
+(Phase 6): appending to `LESSONS_LEARNED.md`, and promoting a general lesson into a Markdown rule file
+(`prompts/*.md`). **Never edit the skill's `scripts/*.py`, templates, or any other file** — for a
+lesson that needs a code change, record it in the entry as `⚠ NEEDS CODE PROMOTION` for a human. Do
+not create or delete anything else under the folder.
 
 ## Inputs
 
@@ -37,11 +40,14 @@ strict format review, SharePoint-Online compatibility, heading spacing, no lefto
 3. `{{PROPOSAL_SKILL_DIR}}/prompts/05b_format_review.md` — run `format_reviewer.py` + the `auto_fix.py`
    loop (max 2 iterations) until 0 blockers, as that prompt specifies.
 4. `{{PROPOSAL_SKILL_DIR}}/prompts/06_report.md` — run the report step INCLUDING the skill's own
-   **self-learning**: append a lesson entry to `{{PROPOSAL_SKILL_DIR}}/LESSONS_LEARNED.md` exactly
-   as that phase and the file's own rules describe. This is the skill's BUILT-IN mechanism — use it,
-   do not invent a separate lessons store. Add an entry only if this run surfaced something reusable
-   (a real fix, a gotcha, a good decision); if nothing new, don't pad it. Also write a short run
-   summary to `{{OUTPUT_DIR}}/_report.md`.
+   **self-learning**: append a lesson entry to `{{PROPOSAL_SKILL_DIR}}/LESSONS_LEARNED.md`, AND
+   **promote** a general lesson into the relevant phase prompt (`04_generate.md` /
+   `05b_format_review.md`, Markdown only — promotion is what actually makes the skill smarter), noting
+   where you promoted it. This is the skill's BUILT-IN mechanism — use it, do not invent a separate
+   lessons store. For a lesson that would need a `scripts/*.py` change, DO NOT edit the script in this
+   unattended run — flag it `⚠ NEEDS CODE PROMOTION: <file> — <what>` in the entry for a human. Add an
+   entry only if this run surfaced something reusable (a real fix, a gotcha, a good decision); if
+   nothing new, don't pad it. Also write a short run summary to `{{OUTPUT_DIR}}/_report.md`.
 
 ## OUTPUT (all under `{{OUTPUT_DIR}}/`)
 

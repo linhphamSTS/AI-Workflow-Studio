@@ -2,8 +2,13 @@
 
 Goal: capture the user's request and load the knowledge needed to refine it well.
 
-1. **Read `LESSONS_LEARNED.md` FIRST** and apply every past lesson to this run (classification,
-   notation, renderer gotchas). This is the self-learning loop's read side — do not skip it.
+1. **Load the skill's learned rules.** The durable lessons are already ENFORCED in the prompts,
+   `reference/kb_*.md`, and `scripts/*.py` you use this run (Phase 5 promotes every reusable lesson
+   into those), so the skill applies them automatically — you do not have to memorise them. ALSO
+   skim `LESSONS_LEARNED.md`: it is the DIARY of past runs. Scan it for anything relevant to THIS
+   request (classification, notation, renderer gotchas) and for any lesson not yet promoted. Do not
+   skip it — but note you do NOT need to hold all of it in mind: the promoted rules do the enforcing,
+   so the diary can grow without slowing you down.
 
 2. **Read the taxonomy** `reference/diagram_types.md`. It is the master list of what this skill can
    draw and how requests map to types + renderers. Keep it in mind for Phase 1.

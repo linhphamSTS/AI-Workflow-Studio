@@ -6,10 +6,14 @@
 >
 > - **Phase 0** reads this file at the start of every run and treats each entry as a
 >   hard constraint / preference for the current proposal.
-> - **Phase 6** appends a new entry at the end of every run.
+> - **Phase 6** appends a new entry at the end of every run AND **promotes** any
+>   general lesson into the phase prompt / check that actually runs (mandatory — a
+>   lesson left only here has not improved the skill).
 >
-> Goal: each proposal is more accurate, sharper, and freer of repeated mistakes than
-> the last.
+> This file is a **diary** (it may grow freely — it never slows the skill). The skill's
+> real memory is the **enforced rules** promoted out of here into the prompts/checks, so
+> the log's size never matters. Goal: each proposal is more accurate, sharper, and freer
+> of repeated mistakes than the last.
 
 ## How to read this (Phase 0)
 

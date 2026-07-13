@@ -37,13 +37,25 @@ This is the self-learning loop's write side. After delivering, append an entry t
   record what was subtly hard or what the user tweaked), **Fix applied + where promoted**,
   **Reusable rule**.
 
-## 3. Promote universal lessons (so the mistake can't recur)
-If the lesson is general (not one-off), edit the RIGHT place immediately, and say you did:
+## 3. Promote the lesson into an ENFORCED rule (MANDATORY — this is what makes the skill smarter)
+Appending to the log is NOT enough. A lesson only makes the skill better if the correct behaviour is
+APPLIED next run — so every lesson that could recur MUST be written as an enforced rule in the place
+that actually runs, not left sitting in the log:
 - a **diagram-convention fact** → the matching `reference/kb_*.md`,
-- a **renderer bug/gotcha** → fix `scripts/*.py` (or a note at its top),
+- a **renderer bug/gotcha** → fix `scripts/*.py` (or a guard/note at its top),
 - a **classification / suggestion miss** → `reference/diagram_types.md` (classification hints),
 - a **spec / notation mistake** → `prompts/01_refine.md` or `prompts/03_generate.md`.
 
-This keeps the knowledge base and prompts improving every run — the point of the skill's
-self-learning contract. If skill files are junction-linked into Claude profiles, the edit is live
-immediately; offer to git-commit the repo so it syncs across machines.
+Rules:
+- A lesson is **not complete** until it is EITHER promoted to one of the places above, OR is genuinely
+  one-off (cannot recur). Say which in the entry's **Fix applied + where promoted** line — e.g.
+  `Promoted to: reference/kb_cloud_refarch.md` or `One-off: no promotion needed`.
+- Prefer promoting into a PROMPT or a `kb_*.md` (a rule in prose): that is the durable, low-risk home.
+- Edit a `scripts/*.py` file only for a real code bug/gotcha AND only after you have verified the fix
+  (a human is reviewing this interactive run). Never guess at a code change.
+
+Why this matters: the log is a **diary** — a growing record, which is fine, it never slows the skill.
+The skill's real memory is these **enforced rules** in the prompts / scripts / kb. Because the
+behaviour lives there, the log can grow without ever making the skill slower or less accurate — the
+smartness is in the rules, not in re-reading the diary. If skill files are junction-linked into Claude
+profiles, the edit is live immediately; offer to git-commit the repo so it syncs across machines.

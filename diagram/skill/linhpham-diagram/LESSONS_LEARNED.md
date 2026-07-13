@@ -1,21 +1,28 @@
 # linhpham-diagram — Lessons Learned (self-learning log)
 
-> **MANDATORY self-learning.** Phase 0 reads this file FIRST and applies every past lesson up front.
-> Phase 5 (after EVERY run) appends a new entry here describing what went wrong / what to do better,
-> and PROMOTES any universal lesson into the right place so it can't recur:
+> **MANDATORY self-learning.** This file is the DIARY (a growing record — it never slows the skill).
+> The skill's real memory is the ENFORCED rules that Phase 5 PROMOTES out of here into the place that
+> actually runs, so a lesson can't recur and the log's size never matters:
 > - a diagram-convention fact → the matching `reference/kb_*.md`
 > - a renderer bug/gotcha → a fix in `scripts/*.py` (or a note at the top of it)
 > - a classification / suggestion mistake → `reference/diagram_types.md` classification hints
 > - a spec/notation mistake → `prompts/01_refine.md` or `prompts/03_generate.md`
 >
-> The goal: the workflow gets measurably better each run. An entry is not optional.
+> Phase 0 loads those enforced rules (they apply automatically) and skims this diary for whatever is
+> relevant to the current run. Phase 5 (after EVERY run that surfaced something reusable) appends an
+> entry here AND promotes its rule. **Promotion is not optional** — a lesson that stays only in this
+> log has NOT made the skill smarter.
+>
+> The goal: the workflow gets measurably better each run.
 >
 > **Each entry must have:**
 > - **Title:** what was drawn + diagram type + date (absolute).
 > - **Request → chosen type:** the user's raw words and the type finally drawn (and why).
 > - **What went wrong / friction:** classification miss, missing icon, overflow, label defect,
 >   wrong notation, `.drawio` issue, self-check blocker, user correction — be concrete.
-> - **Fix applied + where promoted:** the file changed so it can't recur.
+> - **Fix applied + where promoted:** the file changed so it can't recur — e.g.
+>   `Promoted to: scripts/build_cloud.py` / `Promoted to: reference/kb_cloud_refarch.md`, or
+>   `One-off: no promotion needed`.
 > - **Reusable rule:** a one-line takeaway for next time.
 
 ---
