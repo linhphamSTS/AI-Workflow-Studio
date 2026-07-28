@@ -541,45 +541,79 @@ def check_techstack_is_table(docx_path: Path, report: Report) -> None:
         report.pass_("techstack_is_table")
 
 
-def check_em_dash_in_prose(docx_path: Path, report: Report) -> None:
-    """The user rejects em-dashes (—) in BODY PROSE as "looks AI". They are
-    allowed ONLY in Problems & Solutions and figure explanation bullets (which
-    render as "●" bullets). Flag any non-bullet, non-heading paragraph — incl.
-    tech-stack table cells — that contains an em-dash, so the rule in
-    04_generate.md is actually enforced, not just documented."""
-    doc = Document(str(docx_path))
-    bad = []
-
-    def scan(paras):
+def _iter_content_paragraphs(doc):
+    """Every paragraph a reader actually sees, including table cells, excluding headings."""
+    def walk(paras):
         for p in paras:
             sname = p.style.name if p.style else ""
             if sname.startswith("Heading"):
                 continue
             txt = (p.text or "").strip()
-            if not txt or txt[0] in "●•-":  # bullets allow em-dashes
-                continue
-            # Figure/table captions use the documented "<Type> — <Scope>" format.
-            if sname == "Caption" or txt.startswith(("Figure", "Bảng", "Table ")):
-                continue
-            if "—" in txt:
-                bad.append(txt[:60])
+            if txt:
+                yield txt
 
-    scan(doc.paragraphs)
+    yield from walk(doc.paragraphs)
     for t in doc.tables:
         for row in t.rows:
             for cell in row.cells:
-                scan(cell.paragraphs)
+                yield from walk(cell.paragraphs)
+
+
+def check_em_dash_in_prose(docx_path: Path, report: Report) -> None:
+    """No em-dash (—) anywhere in the delivered content.
+
+    A spaced em-dash is one of the strongest signals a reader uses to spot
+    machine-written text, and the client rejects it on sight. An earlier version
+    of this check exempted bullets and figure captions, on the grounds that the
+    dash was a structural separator there. That exemption is withdrawn: the reader
+    does not care whether a dash is structural, only that it is there. Use a colon
+    after a bold label, and a comma, a semicolon or two sentences in prose.
+    """
+    doc = Document(str(docx_path))
+    bad = [txt[:70] for txt in _iter_content_paragraphs(doc) if "—" in txt]
 
     if bad:
         report.add(Issue(
             "em_dash_in_prose", "content", "major", False,
-            f"{len(bad)} body-prose paragraph(s) use an em-dash (—); the user rejects these as "
-            f"'looks AI'. Use commas, colons, parentheses or split the sentence. (Em-dashes are "
-            f"allowed only in Problems & Solutions and figure explanation bullets.)",
+            f"{len(bad)} paragraph(s) contain an em-dash (—), which the client rejects as "
+            f"machine-written. Use a colon after a bold label, and a comma, a semicolon or "
+            f"two sentences in prose. This applies to bullets and captions too.",
             detail="; ".join(bad[:5]),
         ))
     else:
         report.pass_("em_dash_prose_ok")
+
+
+# "e.g." and friends read as machine-assembled filler in a client-facing bid.
+# Word-boundary anchored so "Inc." or a version like "v1.e" cannot match.
+_LATIN_ABBREV_RE = re.compile(r"(?<![A-Za-z])(e\.g\.|i\.e\.|etc\.|viz\.|cf\.)", re.IGNORECASE)
+_LATIN_ABBREV_FIX = {
+    "e.g.": "for example / such as",
+    "i.e.": "that is / in other words",
+    "etc.": "finish the list, or name the category",
+    "viz.": "namely",
+    "cf.": "compare",
+}
+
+
+def check_latin_abbreviation_in_content(docx_path: Path, report: Report) -> None:
+    """No Latin abbreviations in the delivered content: write the English instead."""
+    doc = Document(str(docx_path))
+    hits, found = [], set()
+    for txt in _iter_content_paragraphs(doc):
+        for m in _LATIN_ABBREV_RE.finditer(txt):
+            found.add(m.group(1).lower())
+            hits.append(txt[:70])
+    if hits:
+        advice = "; ".join(f"{k} -> {v}" for k, v in _LATIN_ABBREV_FIX.items() if k in found)
+        report.add(Issue(
+            "latin_abbreviation_in_content", "content", "major", False,
+            f"{len(hits)} paragraph(s) use a Latin abbreviation ({', '.join(sorted(found))}), "
+            f"which reads as machine-assembled filler in a client-facing bid. Write it out: {advice}.",
+            detail="; ".join(dict.fromkeys(hits))[:400],
+        ))
+    else:
+        report.pass_("latin_abbreviation_ok")
 
 
 # ---------------------------------------------------------------------------
@@ -608,6 +642,7 @@ CHECKS = [
     ("justify_whitespace_channels",    check_justify_whitespace_channels),
     ("techstack_is_table",             check_techstack_is_table),
     ("em_dash_in_prose",               check_em_dash_in_prose),
+    ("latin_abbreviation_in_content",  check_latin_abbreviation_in_content),
 ]
 
 

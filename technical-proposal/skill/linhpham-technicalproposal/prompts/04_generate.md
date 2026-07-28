@@ -24,15 +24,15 @@ explanation bullets:
   "subheading": "Container Diagram",
   "target_heading": "Container Diagram",
   "png": "project_dir/output/diagrams/container_diagram.png",
-  "caption": "Container Diagram — Loyalty Platform",
-  "intro_paragraph": "<2-3 sentence framing of what this diagram is showing and why the reader should care — NOT a summary of the bullets below. Use the actual products from the chosen stack — AWS services if AWS was chosen, Azure if Azure, K8s primitives if on-prem K8s, etc. Never copy phrasing from a prior bid.>",
+  "caption": "Container Diagram: Loyalty Platform",
+  "intro_paragraph": "<2-3 sentence framing of what this diagram is showing and why the reader should care. NOT a summary of the bullets below. Use the actual products from the chosen stack: AWS services if AWS was chosen, Azure if Azure, K8s primitives if on-prem K8s. Never copy phrasing from a prior bid. No em-dashes and no Latin abbreviations in this text.>",
   "explanation_bullets": [
-    "**<Service A>** — <responsibility + scaling pattern; products = whatever the §2 tech-stack table picked, not the example>.",
-    "**<Service B>** — <…>",
-    "**<Datastore>** — <storage choice + HA/DR pattern from §2>",
+    "**<Service A>**: <responsibility + scaling pattern; products = whatever the §2 tech-stack table picked, not the example>.",
+    "**<Service B>**: <…>",
+    "**<Datastore>**: <storage choice + HA/DR pattern from §2>",
     "..."
   ]
-  // NOTE: do NOT prefix bullets with "1.", "(1)", "Step 1 — ". The renderer
+  // NOTE: do NOT prefix bullets with "1.", "(1)", "Step 1: ". The renderer
   // prepends "●" automatically — adding a number creates a "● 1. text"
   // duplicate. Just start each item with the bold component name.
   // Examples (illustrative only — do NOT copy):
@@ -56,10 +56,11 @@ Conventions:
     automatically — adding a number creates the duplicate `"●  1. text"`
     that the user has flagged as a quality bug. Just start the bullet
     with the component name.
-  - Format: `"**Component name** — concise description that explains what
-    it does and why it's in this design."` (no leading number, no leading `●`).
+  - Format: `"**Component name**: concise description that explains what
+    it does and why it's in this design."` (no leading number, no leading `●`,
+    and a COLON after the bold label, never a dash).
   - For sequence-style diagrams where step order matters semantically,
-    write `"**Step — Bank API POST with Idempotency-Key** — ..."` (the
+    write `"**Step, Bank API POST with Idempotency-Key**: ..."` (the
     word "Step" carries the order without imposing a digit on every bullet).
   - One bullet per visible element. Every box / icon / boundary in the
     PNG must be named in the prose so a reader can re-draw the diagram
@@ -554,7 +555,7 @@ must:
 - Data classification tag on stores: `[PII]`, `[PCI]`, `[Public]`.
 - Ownership: colour band per team / bounded context (DDD).
 - **Legend mandatory** when the diagram uses more than 2 colours or 2 line styles.
-- Caption text: write `<Type> — <Scope>` only (e.g. `Container Diagram — Booking Service`). `build_docx.py` wraps it as `Figure {SEQ}: <Type> — <Scope>` at assemble time so the number stays in sync as more diagrams are added.
+- Caption text: write `<Type>: <Scope>` only, for example `Container Diagram: Booking Service`. `build_docx.py` wraps it as `Figure {SEQ}: <Type>: <Scope>` at assemble time so the number stays in sync as more diagrams are added. Use a colon, never a dash.
 
 #### F. Pixel-level quality rules
 
@@ -753,18 +754,31 @@ upstream partner exists.
 - No phase plans / sprint plans.
 - No specific region names unless client stated one.
 - Justify alignment for body text.
-- **NO em-dashes (` — `) in body prose paragraphs** (executive_summary,
-  purpose, system_overview_intro, techstack_*, summary_body). The user
-  flagged em-dashes as "looks AI" and rejected them. Use commas,
-  semicolons, parentheses, or split into two sentences. Em-dashes ARE
-  still allowed in: (a) the `problems_and_solutions` rows where they
-  delimit problem/solution structure, and (b) explanation_bullets where
-  they delimit `**Component** — description`.
+- **NO em-dashes (` — `) ANYWHERE in the delivered content.** Not in body prose,
+  not in bullets, not in captions, not in table cells. A spaced em-dash is one of
+  the strongest signals a reader uses to spot machine-written text, and the client
+  has rejected it on sight. There is no carve-out: earlier versions of this rule
+  allowed em-dashes inside `problems_and_solutions` and `explanation_bullets`, and
+  that exception is now withdrawn.
+  - Where it separated a bold label from its description, use a colon:
+    `**Component**: description`, not `**Component** — description`.
+  - Mid-sentence, use a comma or a semicolon, put the aside in parentheses, or
+    split it into two sentences. Two shorter sentences almost always read better
+    than one sentence hinged on a dash.
+- **NO Latin abbreviations: `e.g.`, `i.e.`, `etc.`, `viz.`, `cf.`** These read as
+  machine-assembled filler in a client-facing bid. Write the English instead:
+  `for example`, `such as`, `that is`, `in other words`. For `etc.`, either finish
+  the list or name the category: "and the remaining authority interfaces", not
+  "authority interfaces, etc.". If a list is genuinely open-ended, say "including"
+  at the start and stop when the list is complete enough.
+- Both rules are ENFORCED by `format_reviewer.py` (`em_dash_in_prose`,
+  `latin_abbreviation_in_content`) and normalised defensively by `build_docx.py`,
+  so a slip is caught rather than shipped. Do not rely on that: write it correctly.
 - **Problems & Solutions** — render as bullets following the Phase 2 brief's `1b` section verbatim (don't summarise it down). Each bullet is two sentences: the bold problem name + root-cause + quantified pain; then the solution named by architectural pattern + trade-off + measurable acceptance criterion. Reject vague consultant-speak ("leverage", "best-in-class", "world-class", "robust solution", "seamlessly integrate", "modernise"). The bullet count follows the brief, not a fixed quota.
 - Mobile App Strategy: short and decision-only. If mobile is not in scope, set `mobile_app_strategy` to `null` and the build script will skip the section. The same null-drop applies to `techstack_data` and `techstack_ai` — only fill them when the project actually needs a data pipeline / AI layer.
 - **`summary_body`** — final wrap-up of the proposal: 3–8 short paragraphs that restate the headline architectural choice, the four commitments (tech depth, delivery confidence, IP / portability, post-go-live ownership), and the service-level targets. Per-project; do not recycle wording from prior bids.
 - **`case_study_title`** — the CASE STUDY section body itself is kept verbatim from the template (a single intro paragraph plus a hyperlink to a relevant STS case study). Only the title is per-project — set this to the name of the comparable client / engagement you want referenced. If the template's existing reference is not the best fit for this bid, flag it in the Phase 6 caveats so the user can swap the hyperlink target manually.
-- **`diagram_captions`** — write each value as the FIGURE TITLE ONLY, e.g. `"Container Diagram — Booking Service"` (no `"Figure 3: "` prefix). `build_docx.py` wraps it with a Word SEQ field so the figure number is computed by Word automatically when the file opens. This keeps Section 2 diagrams (Figures 1–N, per project) and Section 3's verbatim diagrams (Figures N+1 onwards) renumbered correctly no matter how many diagrams a given project has. Match the diagram slugs you set in `diagrams.json` for `target_heading` so the caption attaches to the right image.
+- **`diagram_captions`**: write each value as the FIGURE TITLE ONLY, for example `"Container Diagram: Booking Service"` (no `"Figure 3: "` prefix). `build_docx.py` wraps it with a Word SEQ field so the figure number is computed by Word automatically when the file opens. This keeps Section 2 diagrams (Figures 1–N, per project) and Section 3's verbatim diagrams (Figures N+1 onwards) renumbered correctly no matter how many diagrams a given project has. Match the diagram slugs you set in `diagrams.json` for `target_heading` so the caption attaches to the right image.
 
 ## Agent C — template-setup
 

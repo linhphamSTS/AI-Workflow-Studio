@@ -468,7 +468,22 @@ def _strip_manual_numbering(text: str) -> str:
             stripped = stripped[m.end():].lstrip()
             continue
         break
-    return stripped.strip()
+    return _label_dash_to_colon(stripped.strip())
+
+
+def _label_dash_to_colon(text: str) -> str:
+    """Turn a `**Label** — description` bullet into `**Label**: description`.
+
+    A spaced em-dash is one of the clearest tells of machine-written prose and the
+    client rejects it on sight, so 04_generate.md forbids it outright. This is the
+    defensive net: it only rewrites the STRUCTURAL separator after a bold label,
+    which is a mechanical substitution with one right answer. A mid-sentence dash
+    needs a judgement call between a comma, a semicolon and two sentences, so that
+    one is left to the writer and caught by `format_reviewer.check_em_dash_in_prose`.
+    """
+    if not text:
+        return text
+    return re.sub(r'(\*\*[^*]+\*\*)\s*[—–]\s*', r'\1: ', text, count=1)
 
 
 def _build_bullet_paragraph(text: str, *, is_first: bool = False):

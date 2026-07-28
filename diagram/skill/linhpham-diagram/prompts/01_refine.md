@@ -58,7 +58,9 @@ notation for that type. This is where a vague request becomes a professional dia
   shapes; ERD crow's-foot; C4 boundaries; microservices DB-per-service + sync/async; cloud nested
   VPC/VNet + edge-outside + legend + colour hierarchy; sequence lifelines + fragments).
 - Apply the house style from `kb_house_style_catalog.md`: caption `<Type> — <Scope>`, legend for
-  sync/async, `[PII]`/`[PCI]`/`[SoR]` tags where relevant, `**Component** — description` bullets.
+  sync/async, `[PII]`/`[PCI]`/`[SoR]` tags where relevant, `**Component**: description` bullets
+  (a colon after the bold label, never a dash: a spaced em-dash reads as machine-written and is
+  rejected on sight, and the same applies to `e.g.` / `i.e.` / `etc.` anywhere in delivered text).
 - Fill sensible, domain-plausible detail the user omitted, but **do not invent specifics that would
   mislead** (exact instance counts, made-up service names) — keep them generic or labelled as
   assumptions, and list assumptions in the brief.

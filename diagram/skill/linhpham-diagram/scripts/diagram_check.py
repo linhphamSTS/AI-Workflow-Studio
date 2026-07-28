@@ -278,9 +278,14 @@ def check_diagram_block(slug: str, entry: dict | None) -> list[dict]:
     caption = (entry.get("caption") or "").strip()
     if not caption:
         issues.append(_issue("warning", "caption_missing", f"'{slug}' has no caption"))
-    elif "—" not in caption and " - " not in caption:
+    elif "—" in caption:
+        # Em-dashes are banned in delivered content (they read as machine-written);
+        # the caption convention is "<Type>: <Scope>".
+        issues.append(_issue("warning", "caption_em_dash",
+                             f"caption uses an em-dash; write '<Type>: <Scope>': {caption[:60]!r}"))
+    elif ":" not in caption and " - " not in caption:
         issues.append(_issue("warning", "caption_format",
-                             f"caption should read '<Type> — <Scope>': {caption[:60]!r}"))
+                             f"caption should read '<Type>: <Scope>': {caption[:60]!r}"))
     if not (entry.get("intro_paragraph") or "").strip():
         issues.append(_issue("warning", "intro_missing", f"'{slug}' has no intro_paragraph"))
     bullets = entry.get("explanation_bullets") or []

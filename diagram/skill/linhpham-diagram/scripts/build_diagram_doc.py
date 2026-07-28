@@ -14,7 +14,9 @@ generated" / "how to reproduce" / engine notes — a proposal figure never shows
 those; the reader wants the picture and a description of what is in it. Each
 explanation bullet is self-contained: it names a component in bold and folds in
 what the component is AND how it connects (mechanism), matching the proposal
-convention "**Component** — role; talks to X over HTTPS, publishes events to Y".
+convention "**Component**: role; talks to X over HTTPS, publishes events to Y".
+The separator after the bold label is a COLON, never a dash: a spaced em-dash is
+one of the clearest tells of machine-written text and is rejected on sight.
 
 The content is DERIVED FROM THE SPEC that produced the diagram, so it can never
 drift from the picture.
@@ -427,14 +429,16 @@ def build_doc(desc: dict, png: Path, out: Path):
     cr2 = capp.add_run(cap); cr2.italic = True; cr2.font.size = Pt(9)
     cr2.font.color.rgb = RGBColor(0x60, 0x6a, 0x78)
 
-    # explanation bullets — "● **Name** — description"
+    # explanation bullets: "● **Name**: description".
+    # A colon, not a dash: a spaced em-dash is one of the clearest tells of
+    # machine-written text and the client rejects it on sight.
     for name, body in d["bullets"]:
         para = doc.add_paragraph(style="List Bullet")
         para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         para.paragraph_format.space_after = Pt(4)
         rn = para.add_run(str(name)); rn.bold = True
         if body:
-            para.add_run(f" — {body}")
+            para.add_run(f": {body}")
 
     out.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(out))
