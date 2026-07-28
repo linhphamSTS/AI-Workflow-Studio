@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
-Diagram-WorkFlow web app — a local UI over the `linhpham-diagram` skill.
+AI Workflow Studio — a local UI that drives the `linhpham-diagram` and
+`linhpham-technicalproposal` skills.
 
-Flow (one workspace per project):
+Flow (one workspace per project; the type is chosen at creation):
     inputs (prompt / uploaded docs / a folder)
-      -> REFINE   : `claude -p` runs the skill head-less -> spec/manifest.json  (GATE)
-      -> confirm / edit the manifest in the browser
-      -> GENERATE : deterministic Python renderers -> output/diagrams/*.png/.svg/.drawio/.docx
-      -> PREVIEW  : view PNGs; iterate (edit + re-run) until happy
-      -> EXPORT   : download a zip of the output folder
+      -> REFINE / ANALYZE : `claude -p` runs the skill head-less -> spec/  (GATE)
+      -> confirm / edit the spec or plan in the browser
+      -> GENERATE : diagram = deterministic Python renderers; proposal = the skill's Phase 4-6
+      -> PREVIEW  : view the output; iterate (edit + re-run) until happy
+      -> EXPORT   : download a zip of the version folder
 
-Refine is an LLM step (the real skill via the installed `claude` CLI, no API key).
-Generate is pure Python (fast, no LLM) using the skill's build_cloud / build_graph /
-build_sequence / build_diagram_doc / diagram_check scripts.
+Refine/Analyze is an LLM step (the real skill via the installed `claude` CLI, no API key).
+Diagram generate is pure Python (fast, no LLM) using the skill's build_cloud / build_graph /
+build_sequence / build_diagram_doc / diagram_check scripts; proposal generate runs the
+technical-proposal skill head-less and is read-only against that skill.
 
 Run:
     python webapp/server.py            # -> http://127.0.0.1:8000
@@ -27,6 +29,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import uuid
 import zipfile
 from datetime import datetime, timezone
@@ -65,6 +68,9 @@ DIAGRAM_SELFLEARN_TIMEOUT = int(os.environ.get("DIAGRAM_SELFLEARN_TIMEOUT", "600
 PROPOSAL_ANALYZE_TIMEOUT = int(os.environ.get("PROPOSAL_ANALYZE_TIMEOUT", "1200"))    # 20 min
 PROPOSAL_GENERATE_TIMEOUT = int(os.environ.get("PROPOSAL_GENERATE_TIMEOUT", "3600"))  # 60 min (heavy)
 RENDER_TIMEOUT = int(os.environ.get("DIAGRAM_RENDER_TIMEOUT", "180"))   # per diagram
+# ingest.py's own default is 20k chars/file, which truncates a real RFP and most of a
+# WBS spreadsheet. Requirements the analysis never sees cannot end up in the proposal.
+INGEST_MAX_CHARS = int(os.environ.get("INGEST_MAX_CHARS", "250000"))
 
 RENDERER = {"cloud": "build_cloud.py", "graph": "build_graph.py", "sequence": "build_sequence.py"}
 
@@ -138,6 +144,24 @@ def job_log(ws_id: str, line: str) -> None:
         JOBS.setdefault(ws_id, {"log": []})["log"].append(line)
 
 
+def _cancelled(ws_id: str) -> bool:
+    with JOBS_LOCK:
+        return bool((JOBS.get(ws_id) or {}).get("cancel"))
+
+
+def _finish_job(ws_id: str, phase: str, exc: BaseException) -> None:
+    """Common failure handling: a user cancel is not an error, it is a stop."""
+    if _cancelled(ws_id) or "cancelled by user" in str(exc):
+        set_status(ws_id, "error", error=f"{phase} stopped by you")
+        job_log(ws_id, "! stopped")
+    elif isinstance(exc, subprocess.TimeoutExpired):
+        set_status(ws_id, "error", error=f"{phase} timed out")
+        job_log(ws_id, "! timed out")
+    else:
+        set_status(ws_id, "error", error=f"{phase} failed: {exc}")
+        job_log(ws_id, f"! {exc}")
+
+
 def slugify(s: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "_", (s or "").lower()).strip("_")
     return s or "diagram"
@@ -145,12 +169,19 @@ def slugify(s: str) -> str:
 
 # --------------------------------------------------------------------------- ingest
 def run_ingest(ws_id: str, source_dir: Path) -> Path | None:
-    """Build spec/_ingest_digest.md from a folder of docs. Returns digest path or None."""
+    """Build spec/_ingest_digest.md from a folder of docs. Returns digest path or None.
+
+    ingest.py defaults to 20k chars per file, which silently drops the tail of a real
+    RFP (and most of a WBS spreadsheet) — exactly the requirements a proposal must not
+    miss. Modern context windows make that cap unnecessary, so raise it here; the
+    per-file limit still guards against one pathological file swamping the digest.
+    """
     d = WORKSPACES_DIR / ws_id
     digest = d / "spec" / "_ingest_digest.md"
     digest.parent.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, str(SCRIPTS_DIR / "ingest.py"),
-           "--dir", str(source_dir), "--out", str(digest)]
+           "--dir", str(source_dir), "--out", str(digest),
+           "--max-chars-per-file", str(INGEST_MAX_CHARS)]
     job_log(ws_id, f"$ ingest {source_dir}")
     p = subprocess.run(cmd, cwd=str(SCRIPTS_DIR), env=_child_env(), creationflags=_NO_WINDOW,
                        capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -203,21 +234,10 @@ def refine_job(ws_id: str):
         # 3) run the skill head-less
         prompt = build_refine_prompt(ws_id, meta)
         (d / "spec" / "_refine_prompt.md").write_text(prompt, encoding="utf-8")
-        cmd = [CLAUDE, "-p", prompt,
-               "--output-format", "json",
-               "--permission-mode", "bypassPermissions",
-               "--add-dir", str(SKILL_DIR)]
-        if REFINE_MODEL:
-            cmd += ["--model", REFINE_MODEL]
-        job_log(ws_id, "$ claude -p (refine)  [usually 3-5 minutes: reads the KB, designs the spec]")
-        p = subprocess.run(cmd, cwd=str(d), env=_child_env(), **_hidden_console(),
-                           capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=REFINE_TIMEOUT)
-        tail = (p.stdout or "").strip()[-800:]
-        if tail:
-            job_log(ws_id, tail)
-        if p.stderr.strip():
-            job_log(ws_id, "stderr: " + p.stderr.strip()[-500:])
+        job_log(ws_id, "  [usually 3-5 minutes: reads the KB, designs the spec]")
+        # Same streamed + cancellable runner as the proposal phases, so every LLM step
+        # in the app reports progress live and can be stopped from the UI.
+        _run_claude(ws_id, prompt, REFINE_TIMEOUT, "refine", add_dirs=[SKILL_DIR])
 
         # 4) verify the manifest exists + parses
         if not manifest.exists():
@@ -233,41 +253,213 @@ def refine_job(ws_id: str):
         set_status(ws_id, "error", error=f"refine timed out after {REFINE_TIMEOUT}s")
         job_log(ws_id, "! refine timed out")
     except Exception as e:  # noqa: BLE001
-        set_status(ws_id, "error", error=f"refine failed: {e}")
-        job_log(ws_id, f"! {e}")
+        _finish_job(ws_id, "refine", e)
     finally:
         with JOBS_LOCK:
             JOBS.get(ws_id, {})["running"] = False
 
 
 # --------------------------------------------------------- PROPOSAL (drives the tech-proposal skill)
+def _prior_version_block(ws_id: str, meta: dict) -> str:
+    """Tell the skill exactly what a re-run may reuse — and what it must re-derive.
+
+    A prior version is a source of CONTENT stability, never of rendering. Carrying a
+    previous run's build script forward freezes the renderer at whatever the skill
+    could do that day, so every later improvement becomes invisible. The skill's own
+    `04_generate.md` states this rule; repeating it here means the run does not depend
+    on the lessons diary being read carefully.
+    """
+    versions = meta.get("versions") or []
+    if not versions:
+        return ("This is the FIRST run for this workspace — there is no previous version.\n"
+                "Derive everything from `plan.json` and the source documents.")
+    prev = versions[-1]
+    pdir = str(_versions_dir(ws_id) / str(prev["id"])).replace("\\", "/")
+    return (
+        f"This is a RE-RUN. The previous output is version **{prev['id']}** at `{pdir}`\n"
+        f"(`{prev.get('docx', '?')}`, {prev.get('n_diagrams', 0)} diagram(s)).\n"
+        "\n"
+        "**Reuse its CONTENT so the proposal stays stable across iterations:**\n"
+        f"- `{pdir}/replacements.json` — the written prose the user already accepted\n"
+        f"- `{pdir}/diagrams/diagrams.json` — each diagram's slug, `target_heading`, `caption`,\n"
+        "  `intro_paragraph` and `explanation_bullets`\n"
+        "- the diagram set and section structure implied by `plan.json`\n"
+        "\n"
+        "**Re-derive the RENDERING from scratch — do NOT copy it forward:**\n"
+        "- re-select each diagram's renderer from the PRIMARY list in `04_generate.md`\n"
+        "  (`build_cloud` / `build_graph` / `build_sequence`; mingrammer only as a genuine fallback)\n"
+        "- author a fresh `spec.json` per diagram and re-render the PNG / SVG / `.drawio`\n"
+        "- re-assemble the `.docx` with the skill's current `build_docx.py`\n"
+        "\n"
+        f"**Never copy `{pdir}`'s build script, renderer choice or rendered images into the new\n"
+        "version.** They were produced by whatever the skill could do on that date; re-rendering is\n"
+        "what lets this run pick up the current renderers, DPI rules and SA-grade structure. If a\n"
+        "re-render is genuinely worse than the previous version, say so in the Phase 6 report rather\n"
+        "than silently reinstating the old images."
+    )
+
+
 def _fill_proposal_prompt(tmpl_path: Path, ws_id: str, meta: dict, output_dir: Path | None = None) -> str:
     d = WORKSPACES_DIR / ws_id
     fwd = lambda p: str(p).replace("\\", "/")
-    return (tmpl_path.read_text(encoding="utf-8")
-            .replace("{{WORKSPACE_DIR}}", fwd(d))
-            .replace("{{PROPOSAL_SKILL_DIR}}", fwd(PROPOSAL_SKILL_DIR))
-            .replace("{{OUTPUT_DIR}}", fwd(output_dir) if output_dir else fwd(d / "output"))
-            .replace("{{FOLDER}}", meta.get("folder", "") or "(none; use the uploaded inputs / digest)")
-            .replace("{{PROMPT_TEXT}}", meta.get("prompt", "") or "(no extra context)"))
+    filled = (tmpl_path.read_text(encoding="utf-8")
+              .replace("{{WORKSPACE_DIR}}", fwd(d))
+              .replace("{{PROPOSAL_SKILL_DIR}}", fwd(PROPOSAL_SKILL_DIR))
+              .replace("{{OUTPUT_DIR}}", fwd(output_dir) if output_dir else fwd(d / "output"))
+              .replace("{{PRIOR_VERSION}}", _prior_version_block(ws_id, meta))
+              .replace("{{FOLDER}}", meta.get("folder", "") or "(none; use the uploaded inputs / digest)")
+              .replace("{{PROMPT_TEXT}}", meta.get("prompt", "") or "(no extra context)"))
+    # A placeholder that survives substitution reaches the model as literal "{{KEY}}" and is
+    # silently ignored — the run then quietly loses whatever that block was meant to say.
+    leftover = sorted(set(re.findall(r"\{\{[A-Z_]+\}\}", filled)))
+    if leftover:
+        raise RuntimeError(
+            f"{tmpl_path.name}: unfilled placeholder(s) {', '.join(leftover)} — "
+            "add the substitution in _fill_proposal_prompt()")
+    return filled
 
 
-def _run_claude(ws_id: str, prompt: str, timeout: int, label: str) -> subprocess.CompletedProcess:
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Kill the claude process AND its children (it spawns python / dot / bash)."""
+    if proc.poll() is not None:
+        return
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           capture_output=True, creationflags=_NO_WINDOW, timeout=30)
+        else:
+            os.killpg(os.getpgid(proc.pid), 15)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        proc.wait(timeout=15)
+    except Exception:  # noqa: BLE001
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _short(s: str, n: int = 150) -> str:
+    s = " ".join((s or "").split())
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _describe_event(evt: dict) -> str | None:
+    """Turn one stream-json event into a readable progress line (or None to skip)."""
+    kind = evt.get("type")
+    if kind == "system" and evt.get("subtype") == "init":
+        return f"  session started (model: {evt.get('model', '?')})"
+    if kind == "assistant":
+        out = []
+        for block in (evt.get("message") or {}).get("content") or []:
+            btype = block.get("type")
+            if btype == "text":
+                first = next((ln for ln in (block.get("text") or "").splitlines() if ln.strip()), "")
+                if first:
+                    out.append("  " + _short(first, 180))
+            elif btype == "tool_use":
+                name = block.get("name", "tool")
+                inp = block.get("input") or {}
+                if name == "Bash":
+                    detail = inp.get("command", "")
+                elif name in ("Read", "Write", "Edit", "NotebookEdit"):
+                    detail = str(inp.get("file_path", ""))
+                elif name == "Task":
+                    detail = inp.get("description", "") or inp.get("subagent_type", "")
+                elif name in ("Grep", "Glob"):
+                    detail = inp.get("pattern", "")
+                else:
+                    detail = ""
+                out.append(f"  -> {name}: {_short(detail, 140)}" if detail else f"  -> {name}")
+        return "\n".join(out) or None
+    if kind == "result":
+        cost = evt.get("total_cost_usd")
+        turns = evt.get("num_turns")
+        bits = [f"finished ({evt.get('subtype', 'done')})"]
+        if turns:
+            bits.append(f"{turns} turns")
+        if isinstance(cost, (int, float)):
+            bits.append(f"${cost:.2f}")
+        return "  " + ", ".join(bits)
+    return None
+
+
+def _run_claude(ws_id: str, prompt: str, timeout: int, label: str,
+                add_dirs: list[Path] | None = None) -> str:
+    """Run the skill head-less, streaming progress into the job log.
+
+    Uses `--output-format stream-json` so a 20-30 minute proposal run is observable
+    instead of a silent black box, and keeps the Popen handle in the job registry so
+    the run can be cancelled from the UI. Returns the final result text.
+    """
     d = WORKSPACES_DIR / ws_id
-    cmd = [CLAUDE, "-p", prompt, "--output-format", "json",
-           "--permission-mode", "bypassPermissions",
-           "--add-dir", str(PROPOSAL_SKILL_DIR), "--add-dir", str(SKILL_DIR)]
+    cmd = [CLAUDE, "-p", prompt, "--output-format", "stream-json", "--verbose",
+           "--permission-mode", "bypassPermissions"]
+    for extra in (add_dirs if add_dirs is not None else [PROPOSAL_SKILL_DIR, SKILL_DIR]):
+        cmd += ["--add-dir", str(extra)]
     if REFINE_MODEL:
         cmd += ["--model", REFINE_MODEL]
     job_log(ws_id, f"$ claude -p ({label})")
-    p = subprocess.run(cmd, cwd=str(d), env=_child_env(), **_hidden_console(),
-                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
-    tail = (p.stdout or "").strip()[-800:]
-    if tail:
-        job_log(ws_id, tail)
-    if p.stderr.strip():
-        job_log(ws_id, "stderr: " + p.stderr.strip()[-500:])
-    return p
+
+    popen_kwargs = dict(_hidden_console())
+    if os.name != "nt":
+        popen_kwargs["start_new_session"] = True   # so we can kill the whole group
+    proc = subprocess.Popen(cmd, cwd=str(d), env=_child_env(),
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, encoding="utf-8", errors="replace",
+                            bufsize=1, **popen_kwargs)
+    with JOBS_LOCK:
+        JOBS.setdefault(ws_id, {"log": []})["proc"] = proc
+
+    state = {"timed_out": False}
+
+    def _on_timeout():
+        state["timed_out"] = True
+        _kill_tree(proc)
+
+    timer = threading.Timer(timeout, _on_timeout)
+    timer.daemon = True
+    timer.start()
+
+    final, saw_result = "", False
+    try:
+        for line in proc.stdout:                    # streams as the model works
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                evt = json.loads(line)
+            except json.JSONDecodeError:
+                job_log(ws_id, "  " + _short(line, 200))
+                continue
+            if evt.get("type") == "result":
+                saw_result = True
+                final = evt.get("result") or ""
+            msg = _describe_event(evt)
+            if msg:
+                job_log(ws_id, msg)
+                with JOBS_LOCK:
+                    JOBS.setdefault(ws_id, {"log": []})["activity"] = msg.strip()
+        proc.wait()
+    finally:
+        timer.cancel()
+        with JOBS_LOCK:
+            job = JOBS.get(ws_id, {})
+            job.pop("proc", None)
+            cancelled = job.get("cancel", False)
+
+    err = (proc.stderr.read() or "").strip() if proc.stderr else ""
+    if err:
+        job_log(ws_id, "stderr: " + err[-500:])
+    if cancelled:
+        raise RuntimeError("cancelled by user")
+    if state["timed_out"]:
+        raise subprocess.TimeoutExpired(cmd[0], timeout)
+    if not saw_result and proc.returncode not in (0, None):
+        raise RuntimeError(f"{label} exited with code {proc.returncode}"
+                           + (f": {err[-300:]}" if err else ""))
+    return final
 
 
 def analyze_job(ws_id: str):
@@ -312,8 +504,7 @@ def analyze_job(ws_id: str):
     except subprocess.TimeoutExpired:
         set_status(ws_id, "error", error=f"analyze timed out after {PROPOSAL_ANALYZE_TIMEOUT}s")
     except Exception as e:  # noqa: BLE001
-        set_status(ws_id, "error", error=f"analyze failed: {e}")
-        job_log(ws_id, f"! {e}")
+        _finish_job(ws_id, "analyze", e)
     finally:
         with JOBS_LOCK:
             JOBS.get(ws_id, {})["running"] = False
@@ -376,8 +567,7 @@ def proposal_generate_job(ws_id: str):
     except subprocess.TimeoutExpired:
         set_status(ws_id, "error", error=f"generate timed out after {PROPOSAL_GENERATE_TIMEOUT}s")
     except Exception as e:  # noqa: BLE001
-        set_status(ws_id, "error", error=f"generate failed: {e}")
-        job_log(ws_id, f"! {e}")
+        _finish_job(ws_id, "generate", e)
     finally:
         with JOBS_LOCK:
             JOBS.get(ws_id, {})["running"] = False
@@ -432,6 +622,8 @@ def generate_job(ws_id: str):
         results = []
         dj_entries = []          # -> output/diagrams/diagrams.json (skill's sidecar format)
         for i, dg in enumerate(diagrams):
+            if _cancelled(ws_id):     # honour Stop between diagrams (a renderer is short)
+                raise RuntimeError("cancelled by user")
             kind = (dg.get("kind") or "graph").lower()
             slug = slugify(dg.get("slug") or dg.get("title") or f"diagram_{i+1}")
             title = dg.get("title") or slug
@@ -528,8 +720,7 @@ def generate_job(ws_id: str):
         # fails the generate. Off with DIAGRAM_SELFLEARN=0.
         _diagram_selflearn(ws_id, out)
     except Exception as e:  # noqa: BLE001
-        set_status(ws_id, "error", error=f"generate failed: {e}")
-        job_log(ws_id, f"! {e}")
+        _finish_job(ws_id, "generate", e)
     finally:
         with JOBS_LOCK:
             JOBS.get(ws_id, {})["running"] = False
@@ -565,13 +756,14 @@ def start_job(ws_id: str, phase: str, target):
         cur = JOBS.get(ws_id)
         if cur and cur.get("running"):
             raise HTTPException(409, f"a {cur.get('phase')} job is already running")
-        JOBS[ws_id] = {"phase": phase, "running": True, "log": []}
+        JOBS[ws_id] = {"phase": phase, "running": True, "log": [],
+                       "started": time.time(), "cancel": False, "activity": ""}
     set_status(ws_id, "refining" if phase == "refine" else "generating", error="")
     threading.Thread(target=target, args=(ws_id,), daemon=True).start()
 
 
 # --------------------------------------------------------------------------- app
-app = FastAPI(title="Diagram-WorkFlow")
+app = FastAPI(title="AI Workflow Studio")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
@@ -646,14 +838,51 @@ def _detail(ws_id: str) -> dict:
     meta["has_digest"] = (d / "spec" / "_ingest_digest.md").exists()
     with JOBS_LOCK:
         job = JOBS.get(ws_id, {})
+        started = job.get("started")
         meta["job"] = {"phase": job.get("phase"), "running": job.get("running", False),
-                       "log": job.get("log", [])[-40:]}
+                       "log": job.get("log", [])[-60:],
+                       "activity": job.get("activity", ""),
+                       "elapsed": int(time.time() - started) if started else 0,
+                       "cancelling": bool(job.get("cancel")),
+                       "cancellable": bool(job.get("proc"))}
     return meta
 
 
 @app.get("/api/workspaces/{ws_id}")
 def get_workspace(ws_id: str):
     return _detail(ws_id)
+
+
+@app.post("/api/workspaces/{ws_id}/cancel")
+def cancel_job(ws_id: str):
+    """Stop a running refine / analyze / generate. Kills the claude process tree."""
+    ws_dir(ws_id)
+    with JOBS_LOCK:
+        job = JOBS.get(ws_id) or {}
+        if not job.get("running"):
+            raise HTTPException(409, "nothing is running for this workspace")
+        job["cancel"] = True
+        proc = job.get("proc")
+    job_log(ws_id, "! cancelling — stopping the run …")
+    if proc is not None:
+        _kill_tree(proc)
+        return {"ok": True, "stopped": True}
+    # A pure-Python diagram generate has no claude process; it finishes its current
+    # renderer and the flag is picked up by the job loop.
+    return {"ok": True, "stopped": False,
+            "note": "stop requested; the current step will finish first"}
+
+
+@app.post("/api/workspaces/{ws_id}/rename")
+def rename_workspace(ws_id: str, payload: dict):
+    name = (payload or {}).get("name", "")
+    name = " ".join(str(name).split())[:80]
+    if not name:
+        raise HTTPException(400, "name is required")
+    meta = read_meta(ws_id)
+    meta["name"] = name
+    write_meta(ws_id, meta)
+    return {"ok": True, "name": name}
 
 
 @app.delete("/api/workspaces/{ws_id}")
@@ -875,7 +1104,7 @@ if __name__ == "__main__":
     import uvicorn
     host = os.environ.get("DIAGRAM_HOST", "127.0.0.1")
     port = int(os.environ.get("DIAGRAM_PORT", "8000"))
-    print(f"Diagram-WorkFlow web app -> http://{host}:{port}")
+    print(f"AI Workflow Studio -> http://{host}:{port}")
     print(f"  skill: {SKILL_DIR}")
     print(f"  claude: {CLAUDE}  (model: {REFINE_MODEL or 'default'})")
     uvicorn.run(app, host=host, port=port, log_level="info")

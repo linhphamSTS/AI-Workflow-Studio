@@ -38,6 +38,8 @@ MIN_LONG_SIDE_PX = 1500
 MAX_RENDER_H_IN = 9.0        # hard cap: taller than this spills off a Word page
 WORD_TARGET_H_IN = 8.5       # ideal: fit one page AND leave room for the caption
 EMBED_WIDTH_IN = 6.5
+EMBED_DPI_MIN = 220          # below this at the 6.5in Word embed = visibly blurry (blocker)
+EMBED_DPI_TARGET = 300       # crisp target; between MIN and this = warn to re-render wider
 MAX_LABEL_LINE = 24          # chars; a single line longer than this is cramped
 MIN_PNG_BYTES = 3000
 
@@ -98,6 +100,21 @@ def check_png(png: Path) -> list[dict]:
         issues.append(_issue("warning", "png_tight_for_word",
                              f"renders {render_h_in:.1f}in tall at {EMBED_WIDTH_IN}in wide (> {WORD_TARGET_H_IN}in) — "
                              f"fits a Word page but leaves little room for the caption; consider LR or trimming a node"))
+    # Sharpness at the ACTUAL Word embed: build_docx.py inserts figures at width = 6.5in,
+    # so effective DPI = width_px / 6.5in. Only meaningful for a diagram that FITS at 6.5in
+    # wide (a too-tall one is handled above; its width changes on the LR re-render, so
+    # skip it here to avoid a confusing double-blocker).
+    if render_h_in <= MAX_RENDER_H_IN and w:
+        embed_dpi = w / EMBED_WIDTH_IN
+        target_px = int(EMBED_WIDTH_IN * EMBED_DPI_TARGET)
+        if embed_dpi < EMBED_DPI_MIN:
+            issues.append(_issue("blocker", "png_soft_for_embed",
+                                 f"only {embed_dpi:.0f} DPI at the {EMBED_WIDTH_IN}in Word embed ({w}px wide) — "
+                                 f"blurry; re-render >= {target_px}px wide (raise dpi / bump the render scale)"))
+        elif embed_dpi < EMBED_DPI_TARGET:
+            issues.append(_issue("warning", "png_below_crisp",
+                                 f"{embed_dpi:.0f} DPI at the {EMBED_WIDTH_IN}in embed ({w}px wide) — below the "
+                                 f"{EMBED_DPI_TARGET} DPI crisp target; consider a wider render (>= {target_px}px)"))
     if dpi and dpi[0] and dpi[0] < 200:
         issues.append(_issue("warning", "png_dpi_meta", f"PNG dpi metadata {dpi[0]} < 200"))
     return issues

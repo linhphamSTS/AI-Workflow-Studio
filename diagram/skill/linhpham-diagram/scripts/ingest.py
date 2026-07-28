@@ -109,7 +109,12 @@ def ingest(root: Path, out: Path, max_chars: int = 20000):
             stats.append((str(rel), "ERR")); continue
         trunc = ""
         if len(text) > max_chars:
-            text = text[:max_chars]; trunc = "  …(truncated)"
+            dropped = len(text) - max_chars
+            text = text[:max_chars]
+            # Say WHAT was lost and where to get it — a silent "…(truncated)" invites the
+            # reader to treat a partial document as the whole requirement set.
+            trunc = (f"  ⚠ TRUNCATED at {max_chars:,} chars — {dropped:,} more remain; "
+                     f"open the original file for the rest")
         sections.append(f"## {rel}{trunc}\n\n{text or '_(no extractable text)_'}\n")
         stats.append((str(rel), f"{len(text)} chars"))
     out.parent.mkdir(parents=True, exist_ok=True)

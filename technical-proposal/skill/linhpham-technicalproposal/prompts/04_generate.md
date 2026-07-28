@@ -157,6 +157,30 @@ and the SA Charter below — so you do NOT re-implement them; you author a faith
 render, then run the self-check. The `.drawio` + `.svg` come out automatically. Only reach for the
 mingrammer fallback below if a diagram genuinely does not fit any of the three renderers above.
 
+### VERSIONED RE-RUN — reuse the CONTENT, never the RENDERER (MANDATORY)
+
+When you are regenerating a proposal that already has a previous output (a web-app
+`output/versions/<N-1>/`, or any prior run of the same project), separate the two halves:
+
+| Reuse verbatim — this is CONTENT | Re-derive every time — this is RENDERING |
+|---|---|
+| `plan.json` (the confirmed stack + diagram set) | which renderer draws each diagram |
+| `replacements.json` (the written proposal prose) | the `spec.json` you feed the renderer |
+| each diagram's `caption`, `intro_paragraph`, `explanation_bullets` | the PNG / SVG / `.drawio` themselves |
+| the diagram set, slugs and `target_heading`s | the `.docx` assembly (`build_docx.py`) |
+
+**NEVER copy a prior version's build script, renderer choice, or rendered images forward.**
+Always re-select the renderer from the PRIMARY list above and re-render from a freshly authored
+`spec.json`. A prior version was produced by whatever the skill could do on that date; the skill
+improves through exactly this prompt, so a run that replays the old build script silently opts out
+of every subsequent improvement — the output stops getting better no matter how much the skill learns.
+
+Reusing the content keeps the proposal stable across iterations (the user already accepted that
+analysis and that prose). Re-deriving the render is what lets a regenerate pick up the current
+renderers, the current DPI rules and the current SA-grade structure. If a re-render genuinely
+regresses against the previous version, say so in the Phase 6 report rather than silently
+reinstating the old images.
+
 ### Fallback — mingrammer `diagrams` DSL (only if a diagram doesn't fit the primary renderers above)
 
 Use the **`diagrams` Python package** (mingrammer/diagrams) together with

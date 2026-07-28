@@ -10,7 +10,11 @@ re-check until it passes. Never deliver a diagram that fails.
 python scripts/diagram_check.py --dir output/diagrams --json output/diagrams/diagram_check.json
 ```
 It verifies:
-- **Sharp / clear:** long side >= 1500 px (blurry in Word otherwise). Rendered at 300 DPI.
+- **Sharp / clear at the real embed size:** a document embeds the figure at **6.5in wide**, so what
+  matters is `width_px / 6.5` — the effective DPI on the page, not the long side. Below 220 DPI
+  (< 1430 px wide) is a BLOCKER (`png_soft_for_embed`); below the 300 DPI crisp target
+  (< 1950 px wide) is a warning (`png_below_crisp`). The renderers already up-render to clear this,
+  so a hit here means something bypassed them. Save with 300-dpi metadata.
 - **Fits one Word page:** rendered height at 6.5in embed width must be <= 9.0in (BLOCKER `png_too_tall`);
   a warning (`png_tight_for_word`) fires above 8.5in so you leave room for the caption. Aim <= 8.5in.
 - **.drawio hygiene:** well-formed, has nodes/edges, no blank boxes, no label line ending on "(",
@@ -59,8 +63,9 @@ principal SA put this in front of a paying client?* If not, redo it.
 
 ## 3. Word-embed confirmation
 Confirm the final PNG embeds cleanly at 6.5in wide on a single Word page: `rendered_h_in = 6.5 * h/w`
-should be <= 8.5in (hard max 9.0in), long side >= 1500px. State the computed height in the Phase-5
-report so the user knows it will fit.
+should be <= 8.5in (hard max 9.0in), and `width_px >= 1950` (= 300 DPI at that embed width). State
+the computed height AND the effective embed DPI in the Phase-5 report so the user knows it will both
+fit and look crisp.
 
 Only when `diagram_check` reports 0 blockers AND the SA-grade visual review passes, proceed to
 Phase 5.

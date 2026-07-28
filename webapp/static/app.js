@@ -243,6 +243,7 @@ const App = (() => {
     const tbadge = d.type === 'proposal' ? '<span class="tbadge proposal">Technical Proposal</span>' : '<span class="tbadge diagram">Diagram</span>';
     let body = `<div class="ws-head">
         <input class="ws-title" id="ws-title" value="${esc(d.name)}" readonly>
+        <button class="btn ghost sm" title="Rename this workspace" onclick="App.rename()">${ic('edit')}</button>
         ${tbadge}<span class="pill ${d.status}">${d.status}</span><div class="spacer"></div>
         <button class="btn danger" onclick="App.del()">${ic('trash')} Delete</button></div>
       <div class="ws-sub">${ic('layers')}<span>${d.mode} mode</span><span class="sep">•</span>${ic('clock')}<span>created ${esc(created)}</span></div>`;
@@ -368,12 +369,40 @@ const App = (() => {
   }
 
   // ---------- WORKING ----------
+  function hms(s) {
+    s = Math.max(0, s | 0);
+    const m = Math.floor(s / 60), r = s % 60;
+    return m ? `${m}m ${String(r).padStart(2, '0')}s` : `${r}s`;
+  }
   function viewWorking(title, sub) {
-    const log = (detail.job?.log || []).map(esc).join('\n');
+    const job = detail.job || {};
+    const log = (job.log || []).map(esc).join('\n');
+    const act = (job.activity || '').replace(/^\s*->\s*/, '');
+    const stopping = job.cancelling;
     return `<div class="card"><div class="card-body">
-      <div class="working"><div class="orbit"></div><div><div class="wt">${title}</div><div class="ws">${sub}</div></div></div></div>
+      <div class="working"><div class="orbit"></div><div style="min-width:0;flex:1">
+        <div class="wt">${title}</div>
+        <div class="ws">${sub}</div>
+        ${act ? `<div class="ws now" title="${esc(act)}">${ic('play')}<span>${esc(act)}</span></div>` : ''}
+      </div>
+      <div class="wact">
+        <div class="elapsed">${ic('clock')}<span>${hms(job.elapsed || 0)}</span></div>
+        <button class="btn ghost sm" onclick="App.stop()" ${stopping ? 'disabled' : ''}>
+          ${stopping ? 'Stopping…' : 'Stop'}</button>
+      </div></div></div>
       ${log ? `<div class="log"><div class="log-head"><span class="tl"><i></i><i></i><i></i></span> job log</div><pre id="joblog">${log}</pre></div>` : ''}
     </div>`;
+  }
+  async function stop() {
+    const ok = await modalConfirm({
+      title: 'Stop this run?', okText: 'Stop the run', danger: true,
+      message: 'The current step is killed and nothing is saved for this version. '
+             + 'Your inputs, spec and previous versions are untouched, so you can start again.' });
+    if (!ok) return;
+    try { const r = await api('POST', '/api/workspaces/' + current + '/cancel');
+          toast(r.stopped ? 'Run stopped' : 'Stop requested — finishing the current step'); }
+    catch (e) { toast(e.message, true); }
+    await refresh();
   }
 
   // ---------- REVIEW ----------
@@ -616,6 +645,17 @@ const App = (() => {
     await loadList();
   }
 
+  async function rename() {
+    const name = await modalPrompt({ title: 'Rename workspace', value: detail.name || '',
+                                     placeholder: 'Workspace name', okText: 'Rename' });
+    if (!name || name === detail.name) return;
+    try {
+      await api('POST', '/api/workspaces/' + current + '/rename', { name });
+      toast('Renamed');
+      await refresh(); await loadList();
+    } catch (e) { toast(e.message, true); }
+  }
+
   // check the claude CLI is installed + signed in (Refine needs it); warn if not
   let health = null;
   async function checkHealth() {
@@ -652,5 +692,5 @@ const App = (() => {
   return { newWorkspace, saveAndRefine, generate, exportZip, del, zoom, rmFile,
            saveManifest, backToInputs, pickFiles, pickFolder, browseFolder,
            viewVersion, toggleCompare, setCmp, iterateFrom, openHistory, closeHistory, openHelp,
-           savePlan, reopenPlan };
+           savePlan, reopenPlan, stop, rename };
 })();

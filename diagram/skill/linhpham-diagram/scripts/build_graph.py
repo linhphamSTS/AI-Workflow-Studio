@@ -368,6 +368,30 @@ def render(spec: dict, out: Path, emit_drawio: bool = True) -> Path:
         raise RuntimeError(f"Graphviz render failed ({engine}):\n{proc.stderr}\n--- DOT ---\n{src}")
     print(f"Rendered {out}")
 
+    # Sharpness for Word: build_docx.py inserts every figure at width = 6.5in, so the
+    # effective DPI is width_px / 6.5. A small graph rendered at dpi=300 can come out
+    # < 1950px wide (< 300 DPI at 6.5in) and look soft/blurry once embedded. If so,
+    # re-render the raster at a higher Graphviz dpi — re-rasterised sharply from the
+    # SAME vector, NOT upscaled — so the width clears the 300-DPI target. Then stamp
+    # 300-dpi metadata (Graphviz does not always write the pHYs chunk).
+    try:
+        from PIL import Image
+        TARGET_W = 1950  # 300 DPI at Word's 6.5in embed width
+        with Image.open(out) as _im:
+            w0, _h0 = _im.size
+        if w0 and w0 < TARGET_W:
+            hi_dpi = (300 * TARGET_W + w0 - 1) // w0  # integer ceil so width >= TARGET_W
+            src_hi = src.replace("dpi=300", f"dpi={hi_dpi}", 1)
+            proc_hi = subprocess.run([engine_bin, "-Tpng", "-o", str(out)],
+                                     input=src_hi, capture_output=True, text=True, encoding="utf-8",
+                                     creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0))
+            if proc_hi.returncode == 0:
+                print(f"  (up-rendered at dpi={hi_dpi} -> >= {TARGET_W}px wide for a crisp 6.5in Word embed)")
+        with Image.open(out) as _im2:
+            _im2.save(out, format="PNG", dpi=(300, 300))
+    except Exception as exc:  # noqa: BLE001 — never fail the render over the DPI polish
+        print(f"! DPI polish skipped: {exc}", file=sys.stderr)
+
     # Also emit an SVG twin: rendered by the SAME engine so it is pixel-faithful
     # to the PNG, but vector (infinitely sharp, zoomable) AND openable/editable in
     # draw.io. This is the high-fidelity editable format — see 03_generate.md.
