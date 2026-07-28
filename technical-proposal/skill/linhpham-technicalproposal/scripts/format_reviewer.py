@@ -574,10 +574,14 @@ def check_em_dash_in_prose(docx_path: Path, report: Report) -> None:
 
     if bad:
         report.add(Issue(
-            "em_dash_in_prose", "content", "major", False,
+            # BLOCKER, not "major": the client rejects this on sight, and a "major"
+            # never reaches blocker_count, so the "loop until 0 blockers" gate in
+            # 05b would have shipped the document with the em-dashes still in it.
+            "em_dash_in_prose", "content", "blocker", False,
             f"{len(bad)} paragraph(s) contain an em-dash (—), which the client rejects as "
             f"machine-written. Use a colon after a bold label, and a comma, a semicolon or "
-            f"two sentences in prose. This applies to bullets and captions too.",
+            f"two sentences in prose. This applies to bullets and captions too. Fix the "
+            f"offending values in replacements.json / diagrams.json and re-run Phase 5a.",
             detail="; ".join(bad[:5]),
         ))
     else:
@@ -607,9 +611,13 @@ def check_latin_abbreviation_in_content(docx_path: Path, report: Report) -> None
     if hits:
         advice = "; ".join(f"{k} -> {v}" for k, v in _LATIN_ABBREV_FIX.items() if k in found)
         report.add(Issue(
-            "latin_abbreviation_in_content", "content", "major", False,
+            # BLOCKER for the same reason as em_dash_in_prose: a "major" is not counted
+            # by the gate, so it would ship.
+            "latin_abbreviation_in_content", "content", "blocker", False,
             f"{len(hits)} paragraph(s) use a Latin abbreviation ({', '.join(sorted(found))}), "
-            f"which reads as machine-assembled filler in a client-facing bid. Write it out: {advice}.",
+            f"which reads as machine-assembled filler in a client-facing bid. Write it out: "
+            f"{advice}. Fix the offending values in replacements.json / diagrams.json and "
+            f"re-run Phase 5a.",
             detail="; ".join(dict.fromkeys(hits))[:400],
         ))
     else:
