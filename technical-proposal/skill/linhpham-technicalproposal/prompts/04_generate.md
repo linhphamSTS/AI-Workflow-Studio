@@ -158,6 +158,45 @@ and the SA Charter below — so you do NOT re-implement them; you author a faith
 render, then run the self-check. The `.drawio` + `.svg` come out automatically. Only reach for the
 mingrammer fallback below if a diagram genuinely does not fit any of the three renderers above.
 
+### Renderer gotchas that cost a re-render — apply while AUTHORING the spec
+
+These are defects the renderers do NOT prevent for you. Each one was found by looking at a rendered
+PNG, not by a check, so build the spec so they cannot happen:
+
+1. **`build_cloud`: never draw an edge between two nodes in the SAME column.** A node's label is
+   drawn BELOW its icon, and a same-column edge is anchored on the icon edge and runs vertically at
+   the node's centre x, so it ploughs straight through the source node's own label text and through
+   every node stacked between the two endpoints. Give the two ends of the relationship their own
+   columns (a 6th column costs ~700 px of width and reads fine), or drop the edge: in `build_cloud`
+   the COLUMN BOUNDARY is the cluster, so **one** edge into a column visually connects every node
+   inside it and the rest are not "floating".
+2. **`build_cloud`: aim the cross-column edge at a node near the source's own y.** The single node in
+   a short column sits at the vertical centre, so an edge from it to the FIRST node of a 6-node
+   column travels far vertically and clips the icons it passes. Target a node whose row is near the
+   source's row, or balance the columns by giving the short one 2-3 nodes.
+3. **`build_cloud`: a same-column edge label lands in the right-hand gutter** at
+   `node_centre_x + CELL_W/2 + COL_PAD + 10*S`. On the right-most column that runs off the canvas and
+   the label is clipped. Keep such labels to one short word, or restructure per rule 1.
+4. **`build_sequence`: the fragment tag chip collides with the first message label.** The chip is
+   drawn at the fragment box's top-left, in the same y band as the label of the fragment's first
+   message. Before rendering, check `MARGIN*0.6 + textwidth(f"{TYPE}  [{label}]", 26px bold) + 2*22`
+   against `midpoint(first message) - textwidth(first message label, 28px)/2`. If it does not clear,
+   SHORTEN the fragment label (put the nuance in the explanation bullets) or start the fragment on a
+   message whose span sits further right. Participant labels are not wrapped either: keep them under
+   ~20 characters or they clip at `COL_W - 60`.
+5. **Icon packs are not interchangeable in intent.** `assets/icons/ai/` is a VENDOR-LOGO pack
+   (`ai/pay` is Amazon Pay, `ai/openai` is OpenAI). Never reach into it for a GENERIC role such as
+   "partner banks" or "payment provider" — a vendor logo for a product that is not in the chosen
+   stack is an SA-charter anti-pattern and a reviewer reads it as copy-paste. Use a neutral
+   provider-family icon instead (`azure/cost-management-and-billing`, `azure/software-as-a-service`,
+   `azure/compliance`, `azure/marketplace` all read as institution / money / regulator / merchant),
+   and preview an unfamiliar icon by opening the PNG before you trust its name.
+6. **The "no RFP section-number references" rule applies to DIAGRAM TEXT too**, not just body prose.
+   Requirement codes and section numbers (`CC-02`, `SEC-03`, `Section 7.1`) baked into a boundary
+   label or a shared-band caption are exactly the machine-assembled tell the client rejects. Say what
+   the requirement IS ("built once, priced once", "PDPL, residency and secure delivery"), not where it
+   is numbered.
+
 ### VERSIONED RE-RUN — reuse the CONTENT, never the RENDERER (MANDATORY)
 
 When you are regenerating a proposal that already has a previous output (a web-app
@@ -737,6 +776,16 @@ include:
 > needed language/tool logo is missing, run `tools/fetch_tech_logos.mjs`
 > (devicon / simpleicons source) to add it BEFORE assembling. Omit `logo`
 > only when no sensible icon exists.
+>
+> **Head-less / web-app runs cannot fetch a missing logo.** An unattended run is
+> forbidden from writing into the skill folder, and `tools/fetch_tech_logos.mjs`
+> writes into `assets/icons/data/png/`. So in that mode do NOT try to fetch: fall
+> back to rule (2) and give the row its ECOSYSTEM logo (FastAPI → `data/python`,
+> Next.js → `data/react`, JUnit / Flyway → `data/java`, OpenAPI → the gateway
+> icon), then LIST the gap in the Phase 6 report so a human can run the fetch tool
+> once and every later run gets the real logo. Never leave `logo` off a row just
+> because the exact product has no icon — a row with no logo is the visible defect;
+> an ecosystem logo is not.
 
 **Required keys** — the template carries `{{KEY}}` placeholders for every
 key above. Missing keys are caught by the strict reviewer's
