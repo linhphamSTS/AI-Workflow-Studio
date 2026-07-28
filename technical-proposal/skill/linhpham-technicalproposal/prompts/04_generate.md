@@ -196,6 +196,35 @@ PNG, not by a check, so build the spec so they cannot happen:
    label or a shared-band caption are exactly the machine-assembled tell the client rejects. Say what
    the requirement IS ("built once, priced once", "PDPL, residency and secure delivery"), not where it
    is numbered.
+7. **`build_cloud`: anchor the shared band to the BOTTOM-most node of its column.**
+   `_shared_anchor` drops a vertical line from the source node's centre x straight down to the band,
+   so if the source is the FIRST node of a 3-node column the line ploughs through the icons AND the
+   labels of every node stacked below it. Because a node's label is drawn directly under its icon,
+   *some* label is always crossed; picking the bottom node limits the damage to the source's own
+   label, which is the acceptable case. `shared.anchor.from` must therefore name the last entry in
+   that column's `nodes[]`. Same failure mode as rule 1, different code path — rule 1 will not save
+   you here.
+8. **`build_sequence`: never put a self-call on the right-most participant.** The self-loop label is
+   drawn unwrapped at `cx + 150 + 18` and the canvas ends at `MARGIN*2 + COL_W*n`, so a self-message
+   on the last lifeline runs off the edge and is silently truncated ("three way reconciliati"). Check
+   `cx(from) + 168 + textwidth(label, 28px) <= canvas_w`; if it fails, reorder the participants so the
+   self-calling one is not last. Reordering is free and usually improves the reading order anyway.
+9. **Check the ON-PAGE text size, not just the height.** `diagram_check.py` verifies rendered HEIGHT
+   and embed DPI, and a very wide diagram passes both while being unreadable: at a 6.5in embed the
+   on-page size of a label is `font_pt * 6.5 * 300 / 72 / width_px`. A `build_graph` diagram with more
+   than ~10 cards fans out horizontally and can hit 14,000px wide, which puts 13pt body text at under
+   2pt on the page. Compute it before you accept the render; below ~2.5pt, re-author the diagram for
+   `build_cloud`'s manual grid (same content, roughly a third of the width) rather than shrinking the
+   content. Corollary: on `build_graph` cards, keep `subtitle` under ~30 chars — an unwrapped subtitle
+   sets the card width and is the usual cause of the blow-out. `wrap_label` also collapses overflow
+   into the LAST line (`max_lines=3`), so a >66-char node label renders as two short lines plus one
+   enormous one; keep card labels short and push detail into the explanation bullets.
+10. **Two cheap pre-render checks pay for themselves** (write them into the run's own `specs/` folder,
+   never into the skill): one that measures every sequence fragment chip and self-call label against
+   the canvas before rendering (rules 4 and 8), and one that re-renders a `build_cloud` spec to a
+   throwaway path and prints the actual colliding rectangles from `build_cloud._LINT["boxes"]`. The
+   renderer's own `label_overlap` message says only "an edge label overlaps a icon label" — it never
+   names WHICH, so without the probe you are guessing at which of a dozen labels to shorten.
 
 ### VERSIONED RE-RUN — reuse the CONTENT, never the RENDERER (MANDATORY)
 

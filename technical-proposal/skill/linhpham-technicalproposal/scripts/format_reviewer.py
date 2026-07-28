@@ -131,16 +131,39 @@ def check_no_encryption(docx_path: Path, report: Report) -> None:
         report.pass_("not_encrypted")
 
 
+_REL_RE = re.compile(r"<Relationship\b[^>]*/>")
+
+
 def check_no_external_images(docx_path: Path, report: Report) -> None:
+    """An image linked by URL instead of embedded does not travel with the file.
+
+    Test each relationship on its own. The earlier version asked whether the .rels
+    file contained `TargetMode="External"` ANYWHERE and the word "image" ANYWHERE,
+    which is true of every document that has both an embedded image and an ordinary
+    hyperlink: the case-study link alone was enough to raise a false alarm. Two
+    unrelated conditions matched at file level say nothing about any one relationship.
+    """
+    offenders = []
     with zipfile.ZipFile(docx_path) as z:
         for rel_name in z.namelist():
-            if rel_name.endswith(".rels"):
-                data = z.read(rel_name).decode("utf-8", errors="replace")
-                if 'TargetMode="External"' in data and "image" in data.lower():
-                    report.add(Issue("external_image_ref", "sharepoint", "major", False,
-                                     f"External image reference in {rel_name}"))
-                    return
-    report.pass_("images_all_embedded")
+            if not rel_name.endswith(".rels"):
+                continue
+            data = z.read(rel_name).decode("utf-8", errors="replace")
+            for rel in _REL_RE.findall(data):
+                if 'TargetMode="External"' not in rel:
+                    continue
+                type_m = re.search(r'Type="([^"]+)"', rel)
+                if not type_m or not type_m.group(1).rstrip("/").endswith("/image"):
+                    continue          # an external hyperlink is normal and expected
+                target = re.search(r'Target="([^"]+)"', rel)
+                offenders.append(f"{rel_name}: {target.group(1) if target else '?'}")
+    if offenders:
+        report.add(Issue("external_image_ref", "sharepoint", "major", False,
+                         f"{len(offenders)} image(s) linked externally instead of embedded; "
+                         f"they will not render for anyone else",
+                         detail="; ".join(offenders[:5])))
+    else:
+        report.pass_("images_all_embedded")
 
 
 def check_no_unfilled_placeholders(docx_path: Path, report: Report) -> None:

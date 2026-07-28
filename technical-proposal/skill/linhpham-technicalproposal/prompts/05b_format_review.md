@@ -80,6 +80,18 @@ manual-only issues.
 - [ ] No externally linked images — every image must be embedded.
 - [ ] Custom XML schemas section is clean.
 
+> **Known false positive — `external_image_ref`.** `check_no_external_images` tests
+> `'TargetMode="External"' in data and "image" in data.lower()` over the WHOLE `.rels`
+> file rather than per relationship, so ANY document that has embedded images (they all
+> do) plus ANY external **hyperlink** trips it. Before treating it as a defect, list the
+> external relationships and read their `Type`:
+> ```
+> python -c "import zipfile,re;d=zipfile.ZipFile(DOCX).read('word/_rels/document.xml.rels').decode();print(re.findall(r'<Relationship[^>]*TargetMode=\"External\"[^>]*/>',d))"
+> ```
+> If every hit is `.../relationships/hyperlink`, the document is clean: say so explicitly
+> in the Phase 6 report (with the relationship listed) rather than removing a working link
+> to silence the check.
+
 ### Professional polish
 
 - [ ] No literal `{{...}}` placeholder remains.
