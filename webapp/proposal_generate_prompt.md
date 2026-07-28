@@ -14,6 +14,10 @@ new run output under `{{OUTPUT_DIR}}/`. You may write to the skill folder ONLY f
 lesson that needs a code change, record it in the entry as `⚠ NEEDS CODE PROMOTION` for a human. Do
 not create or delete anything else under the folder.
 
+## Optional bid sections the user selected
+
+{{SECTIONS}}
+
 ## Re-run context (what you may reuse)
 
 {{PRIOR_VERSION}}

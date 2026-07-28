@@ -74,6 +74,44 @@ INGEST_MAX_CHARS = int(os.environ.get("INGEST_MAX_CHARS", "250000"))
 
 RENDERER = {"cloud": "build_cloud.py", "graph": "build_graph.py", "sequence": "build_sequence.py"}
 
+# The bid sections the proposal template can render beyond the technical solution.
+# Not every RFP asks for these, so each is opt-in: the analyze step pre-ticks the ones
+# the RFP actually requires, the user adjusts them at the plan gate, and generate fills
+# only what is ticked. Anything unticked is written as null and the build drops the
+# heading entirely. Keys MUST match build_docx.OPTIONAL_SECTION_GROUPS.
+OPTIONAL_SECTIONS = [
+    {"key": "security_data_protection", "group": "Security & Data Protection",
+     "label": "Security & Data Protection",
+     "hint": "Residency, encryption, access control, consent and secure SDLC as its own narrative."},
+    {"key": "team_structure", "group": "Project Team", "label": "Team Structure",
+     "hint": "Squads, how many, what each owns."},
+    {"key": "team_roles", "group": "Project Team", "label": "Roles & Responsibilities",
+     "hint": "The roles and what each is accountable for. Roles only, never invented people."},
+    {"key": "team_engagement_model", "group": "Project Team", "label": "Engagement Model",
+     "hint": "Onshore/offshore split, hours overlap, how the client works with the team."},
+    {"key": "delivery_roadmap", "group": "Delivery Plan & Governance", "label": "Delivery Roadmap",
+     "hint": "Phased roadmap or sequencing proposal."},
+    {"key": "delivery_milestones", "group": "Delivery Plan & Governance",
+     "label": "Milestones & Acceptance", "hint": "Milestones and what acceptance means at each."},
+    {"key": "delivery_governance", "group": "Delivery Plan & Governance",
+     "label": "Governance & Reporting",
+     "hint": "Steering, escalation, change control, reporting cadence."},
+    {"key": "support_model", "group": "Support & Service Levels", "label": "Support Model",
+     "hint": "Run phase coverage, tiers and tooling."},
+    {"key": "service_levels", "group": "Support & Service Levels", "label": "Service Level Targets",
+     "hint": "Availability and severity-based response and resolution targets."},
+    {"key": "assumptions_dependencies", "group": "Assumptions, Dependencies & Risks",
+     "label": "Assumptions & Dependencies", "hint": "What was assumed and what the client must provide."},
+    {"key": "risk_register", "group": "Assumptions, Dependencies & Risks",
+     "label": "Key Risks & Mitigations", "hint": "Risk, impact, and the mitigation built into the approach."},
+    {"key": "references", "group": "Case Study", "label": "References",
+     "hint": "Client references. Never invented; supplied by the bid owner."},
+    {"key": "contractual_exceptions", "group": "Contractual Exceptions",
+     "label": "Contractual Exceptions",
+     "hint": "Exceptions to the client's contract terms. A legal position, so leave off unless instructed."},
+]
+OPTIONAL_SECTION_KEYS = [s["key"] for s in OPTIONAL_SECTIONS]
+
 # Run child processes without flashing a console window on Windows. 0 (the default)
 # on macOS/Linux, so this is safe cross-platform.
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -299,6 +337,48 @@ def _prior_version_block(ws_id: str, meta: dict) -> str:
     )
 
 
+def _sections_block(ws_id: str) -> str:
+    """Tell the generate step exactly which optional bid sections to write.
+
+    The choice belongs to the user, not the model: an RFP that never asked for a
+    delivery roadmap does not want one invented, and a section the client DID ask for
+    must not be silently skipped. So the plan gate records an explicit include flag per
+    section and this block turns it into an instruction with no room to improvise.
+    """
+    plan_path = WORKSPACES_DIR / ws_id / "spec" / "plan.json"
+    chosen = {}
+    try:
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        raw = plan.get("optional_sections") or {}
+        for key, val in raw.items():
+            chosen[key] = bool(val.get("include")) if isinstance(val, dict) else bool(val)
+    except Exception:  # noqa: BLE001
+        pass
+
+    if not chosen:
+        return ("The plan records no per-section choice, so decide each optional section from the\n"
+                "RFP itself: fill the ones its required-contents list asks for and set every other\n"
+                "one to `null`. Never invent a section the client did not ask for.")
+
+    on = [s for s in OPTIONAL_SECTIONS if chosen.get(s["key"])]
+    off = [s for s in OPTIONAL_SECTIONS if not chosen.get(s["key"])]
+    lines = ["The user has chosen exactly which optional bid sections this proposal contains.",
+             "This is a decision, not a suggestion.", ""]
+    if on:
+        lines.append("**WRITE these (a real, grounded value):**")
+        lines += [f"- `{s['key']}` — {s['group']} › {s['label']}. {s['hint']}" for s in on]
+    else:
+        lines.append("**WRITE these:** none. Every optional section is switched off.")
+    lines.append("")
+    if off:
+        lines.append("**Set these to `null`** (the build removes the heading; do not write them):")
+        lines.append("  " + ", ".join(f"`{s['key']}`" for s in off))
+    lines.append("")
+    lines.append("Emit every key listed above in `replacements.json`, using `null` for the off ones, "
+                 "so the choice is explicit in the artefact rather than implied by omission.")
+    return "\n".join(lines)
+
+
 def _fill_proposal_prompt(tmpl_path: Path, ws_id: str, meta: dict, output_dir: Path | None = None) -> str:
     d = WORKSPACES_DIR / ws_id
     fwd = lambda p: str(p).replace("\\", "/")
@@ -307,6 +387,7 @@ def _fill_proposal_prompt(tmpl_path: Path, ws_id: str, meta: dict, output_dir: P
               .replace("{{PROPOSAL_SKILL_DIR}}", fwd(PROPOSAL_SKILL_DIR))
               .replace("{{OUTPUT_DIR}}", fwd(output_dir) if output_dir else fwd(d / "output"))
               .replace("{{PRIOR_VERSION}}", _prior_version_block(ws_id, meta))
+              .replace("{{SECTIONS}}", _sections_block(ws_id))
               .replace("{{FOLDER}}", meta.get("folder", "") or "(none; use the uploaded inputs / digest)")
               .replace("{{PROMPT_TEXT}}", meta.get("prompt", "") or "(no extra context)"))
     # A placeholder that survives substitution reaches the model as literal "{{KEY}}" and is
@@ -791,6 +872,13 @@ def _claude_health() -> dict:
 @app.get("/api/health")
 def health():
     return _claude_health()
+
+
+@app.get("/api/optional-sections")
+def optional_sections():
+    """The catalogue the plan gate renders its checkboxes from, so the UI never
+    hardcodes a list that could drift from the template."""
+    return {"sections": OPTIONAL_SECTIONS}
 
 
 @app.get("/api/workspaces")

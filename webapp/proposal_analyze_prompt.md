@@ -60,6 +60,21 @@ Write `{{WORKSPACE_DIR}}/spec/plan.json` (create `spec/` if needed):
     {"slug": "aws_reference_arch",  "title": "...", "kind": "cloud", "purpose": "..."}
   ],
   "sections": ["Executive Summary","Purpose","System Overview","Technology Stack","Architecture","Mobile App Strategy (only if mobile in scope)","Development Management","Effort Summary"],
+  "optional_sections": {
+    "security_data_protection": {"include": true,  "reason": "one line: what in the RFP asks for it, or why it does not"},
+    "team_structure":           {"include": false, "reason": "..."},
+    "team_roles":               {"include": false, "reason": "..."},
+    "team_engagement_model":    {"include": false, "reason": "..."},
+    "delivery_roadmap":         {"include": false, "reason": "..."},
+    "delivery_milestones":      {"include": false, "reason": "..."},
+    "delivery_governance":      {"include": false, "reason": "..."},
+    "support_model":            {"include": false, "reason": "..."},
+    "service_levels":           {"include": false, "reason": "..."},
+    "assumptions_dependencies": {"include": false, "reason": "..."},
+    "risk_register":            {"include": false, "reason": "..."},
+    "references":               {"include": false, "reason": "..."},
+    "contractual_exceptions":   {"include": false, "reason": "..."}
+  },
   "assumptions": ["anything you assumed because it wasn't in the docs"],
   "open_questions": ["things the client should confirm"]
 }
@@ -69,6 +84,15 @@ Rules:
 - Ground EVERYTHING in the ingested docs. Do not invent client/team/timeline facts.
 - `diagrams` = the set the proposal will contain (the generate step will draw them).
 - If mobile is not in scope, say so in `tech_stack` and omit the mobile section from `sections`.
+- **`optional_sections` is a RECOMMENDATION for the user to confirm, and you must emit all
+  thirteen keys.** Set `include: true` only where the RFP genuinely asks for that section:
+  look for a required-proposal-contents list (often an Appendix), a submission-format
+  clause, the evaluation criteria, and any clause about team, support, SLAs, risks or
+  contract terms. Give a one-line `reason` for EVERY key, including the false ones, so the
+  user can see why a section was left off. Do not tick a section just because the template
+  can render it: an unrequested section is padding, and a requested one that is missing
+  costs marks. The user reviews these as checkboxes at the gate and the generate step
+  fills exactly what survives that review.
 - Write **only** `spec/plan.json`. Do NOT draw diagrams, do NOT build a `.docx`, do NOT ask
   questions, do NOT touch the skill folder. After writing the file, stop.
 

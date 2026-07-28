@@ -1,6 +1,7 @@
 /* AI Workflow Studio SPA — vanilla JS, no build step. */
 const App = (() => {
   let current = null, detail = null, manifest = null, pollTimer = null, pendingFiles = [];
+  let sectionCatalogue = [];   // optional bid sections, served by /api/optional-sections
   let selVer = null, cmpMode = false, cmpA = null, cmpB = null, folderName = '', histView = false, planCache = null;
 
   // ---------- inline SVG icons (no external assets) ----------
@@ -458,6 +459,7 @@ const App = (() => {
         <div class="tbl-wrap"><table class="ptbl"><thead><tr><th>Layer</th><th>Choice</th><th>Rationale</th></tr></thead><tbody>${stack}</tbody></table></div>` : ''}
       ${plan.architecture ? `<div class="hs-t" style="margin:16px 0 6px">Architecture</div><div class="rat" style="white-space:pre-wrap">${esc(plan.architecture)}</div>` : ''}
       ${dgs ? `<div class="hs-t" style="margin:16px 0 8px">${(plan.diagrams || []).length} diagram(s) in the proposal</div>${dgs}` : ''}
+      ${sectionPicker(plan)}
       <details class="spec-edit"><summary>${ic('chevron')} Edit plan JSON (advanced)</summary>
         <textarea class="mono" id="plan-json" rows="16" style="margin-top:12px">${esc(JSON.stringify(plan, null, 2))}</textarea>
         <div class="row end" style="margin-top:10px"><button class="btn sm" onclick="App.savePlan()">${ic('check')} Save edits</button></div>
@@ -468,8 +470,60 @@ const App = (() => {
         <button class="btn primary lg" onclick="App.generate()">${ic('play')} Generate proposal (.docx)</button>
       </div>`;
   }
+  // ---------- optional bid sections ----------
+  // Not every RFP asks for a team page, a roadmap or an SLA table. Each of these
+  // sections is opt-in: analyze pre-ticks the ones the RFP requires and explains why,
+  // the user adjusts here, and generate writes only what survives. Anything unticked
+  // is written as null and the build removes the heading entirely.
+  function sectionPicker(plan) {
+    if (!sectionCatalogue.length) return '';
+    const chosen = plan.optional_sections || {};
+    const groups = [];
+    sectionCatalogue.forEach(s => {
+      let g = groups.find(x => x.name === s.group);
+      if (!g) { g = { name: s.group, items: [] }; groups.push(g); }
+      g.items.push(s);
+    });
+    const on = sectionCatalogue.filter(s => chosen[s.key] && chosen[s.key].include).length;
+    const body = groups.map(g => `
+      <div class="secgrp">
+        <div class="secgrp-h">${esc(g.name)}</div>
+        ${g.items.map(s => {
+          const c = chosen[s.key] || {};
+          const why = c.reason || s.hint;
+          return `<label class="secrow">
+            <input type="checkbox" data-sec="${esc(s.key)}" ${c.include ? 'checked' : ''}
+                   onchange="App.toggleSection('${esc(s.key)}', this.checked)">
+            <span class="secmeta"><b>${esc(s.label)}</b><em>${esc(why)}</em></span>
+          </label>`;
+        }).join('')}
+      </div>`).join('');
+    return `<div class="hs-t" style="margin:18px 0 4px">Optional sections
+        <span class="seccount">${on} of ${sectionCatalogue.length} selected</span></div>
+      <div class="sub" style="margin-bottom:10px">Ticked from what the RFP asks for. Untick anything
+        this client did not request: an unticked section is left out of the document entirely.</div>
+      <div class="secpick">${body}</div>`;
+  }
+
+  async function toggleSection(key, on) {
+    const p = planCache || {};
+    p.optional_sections = p.optional_sections || {};
+    const cur = p.optional_sections[key] || {};
+    p.optional_sections[key] = { include: !!on, reason: cur.reason || '(set by you)' };
+    planCache = p;
+    const ta = $('#plan-json');
+    if (ta) ta.value = JSON.stringify(p, null, 2);
+    const n = $('.seccount');
+    if (n) {
+      const c = sectionCatalogue.filter(s => (p.optional_sections[s.key] || {}).include).length;
+      n.textContent = `${c} of ${sectionCatalogue.length} selected`;
+    }
+    try { await api('PUT', '/api/workspaces/' + current + '/plan', p); }
+    catch (e) { toast(e.message, true); }
+  }
+
   async function savePlan() {
-    try { const p = JSON.parse($('#plan-json').value); await api('PUT', '/api/workspaces/' + current + '/plan', p); planCache = p; toast('Plan saved'); }
+    try { const p = JSON.parse($('#plan-json').value); await api('PUT', '/api/workspaces/' + current + '/plan', p); planCache = p; toast('Plan saved'); await refresh(); }
     catch (e) { toast('Invalid JSON: ' + e.message, true); }
   }
   async function reopenPlan() {
@@ -675,6 +729,8 @@ const App = (() => {
   // restore the selected workspace across F5 / reload via the URL hash (#<id>)
   async function boot() {
     checkHealth();
+    try { sectionCatalogue = (await api('GET', '/api/optional-sections')).sections || []; }
+    catch (e) { sectionCatalogue = []; }   // picker just hides; never blocks the app
     await loadList();
     const id = (location.hash || '').slice(1);
     if (id) { try { await select(id); } catch (e) { showEmpty(); await loadList(); } }
@@ -692,5 +748,5 @@ const App = (() => {
   return { newWorkspace, saveAndRefine, generate, exportZip, del, zoom, rmFile,
            saveManifest, backToInputs, pickFiles, pickFolder, browseFolder,
            viewVersion, toggleCompare, setCmp, iterateFrom, openHistory, closeHistory, openHelp,
-           savePlan, reopenPlan, stop, rename };
+           savePlan, reopenPlan, stop, rename, toggleSection };
 })();
