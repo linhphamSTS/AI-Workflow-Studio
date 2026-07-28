@@ -730,7 +730,23 @@ include:
   "techstack_ai":             [ {"name": "...", "logo": "pack/icon", "description": "..."}, ... ]  | null,
   "mobile_app_strategy": "... | null",
   "case_study_title": "title of a REAL, relevant Saigon Technology case study comparable to this project's domain (a multi-stakeholder platform of similar shape) — sits in body prose, so never null. If no suitable STS reference is known, the user supplies one before sending (the reviewer flags the placeholder if left unfilled).",
-  "case_study_url": "public URL of that STS case study (e.g. 'https://saigontechnology.com/case-studies/<slug>') — fills the case-study hyperlink target, so never null.",
+  "case_study_url": "public URL of that STS case study, for example 'https://saigontechnology.com/case-studies/<slug>'. Fills the case-study hyperlink target, so never null.",
+  "references": "... | null",
+
+  // ---- RFP-driven optional sections (all default to null; see the block below) ----
+  "security_data_protection": "... | null",
+  "team_structure": "... | null",
+  "team_roles": "... | null",
+  "team_engagement_model": "... | null",
+  "delivery_roadmap": "... | null",
+  "delivery_milestones": "... | null",
+  "delivery_governance": "... | null",
+  "support_model": "... | null",
+  "service_levels": "... | null",
+  "assumptions_dependencies": "... | null",
+  "risk_register": "... | null",
+  "contractual_exceptions": "... | null",
+
   "summary_body": "..."
 }
 ```
@@ -827,6 +843,45 @@ upstream partner exists.
 - Mobile App Strategy: short and decision-only. If mobile is not in scope, set `mobile_app_strategy` to `null` and the build script will skip the section. The same null-drop applies to `techstack_data` and `techstack_ai` — only fill them when the project actually needs a data pipeline / AI layer.
 - **`summary_body`** — final wrap-up of the proposal: 3–8 short paragraphs that restate the headline architectural choice, the four commitments (tech depth, delivery confidence, IP / portability, post-go-live ownership), and the service-level targets. Per-project; do not recycle wording from prior bids.
 - **`case_study_title`** — the CASE STUDY section body itself is kept verbatim from the template (a single intro paragraph plus a hyperlink to a relevant STS case study). Only the title is per-project — set this to the name of the comparable client / engagement you want referenced. If the template's existing reference is not the best fit for this bid, flag it in the Phase 6 caveats so the user can swap the hyperlink target manually.
+### RFP-driven optional sections — fill only what the client actually asked for
+
+The template carries these sections with a `{{KEY}}` slot each. **Every one defaults to
+`null` and is REMOVED at build time when null or absent**, so a bid that does not need
+a section shows no trace of it. Read the RFP's "required proposal contents" list (an
+Appendix C, a submission-format clause, or the evaluation criteria) and fill exactly
+the ones it asks for. Filling a section the client never requested is padding.
+
+| Key | Section | Fill it when the RFP asks for |
+|---|---|---|
+| `security_data_protection` | SECURITY & DATA PROTECTION | a security / data-protection approach as its own narrative (residency, encryption, access control, consent and data-subject rights, secure SDLC) |
+| `team_structure` | PROJECT TEAM › Team Structure | the shape of the delivery organisation: squads, how many, what each owns |
+| `team_roles` | › Roles & Responsibilities | the named ROLES and what each is accountable for |
+| `team_engagement_model` | › Engagement Model | onshore/offshore split, working hours overlap, how the client interacts with the team |
+| `delivery_roadmap` | DELIVERY PLAN & GOVERNANCE › Delivery Roadmap | a phased roadmap or a sequencing proposal |
+| `delivery_milestones` | › Milestones & Acceptance | milestones and what acceptance means at each |
+| `delivery_governance` | › Governance & Reporting | steering, escalation, change control, reporting cadence |
+| `support_model` | SUPPORT & SERVICE LEVELS › Support Model | a run / managed-service phase: coverage, tiers, tooling |
+| `service_levels` | › Service Level Targets | availability and severity-based response and resolution targets |
+| `assumptions_dependencies` | ASSUMPTIONS, DEPENDENCIES & RISKS › Assumptions & Dependencies | assumptions and what the client must provide |
+| `risk_register` | › Key Risks & Mitigations | a risk view; each entry states the risk, its impact and the mitigation already built into the approach |
+| `references` | CASE STUDY › References | client references |
+| `contractual_exceptions` | CONTRACTUAL EXCEPTIONS | exceptions to the client's contract terms |
+
+**Hard rule for the team section: describe roles, never invent people.** Give the role,
+what it is accountable for, its seniority band and its location. Do **not** invent a
+person's name, CV, years of experience, certification or photograph. Named personnel
+and CVs are supplied by the bid owner from real staff records, and the RFP usually
+wants them as an annex rather than in the technical narrative. If the RFP demands named
+CVs, write the role structure here and flag in the Phase 6 caveats that the named CVs
+and the onshore/offshore headcount must be attached before sending.
+
+The same restraint applies to `references` (never invent a client name or a contact) and
+to `contractual_exceptions` (a legal position is the bid owner's to state, not yours: if
+you have no instruction, leave it null rather than inventing a stance). For
+`delivery_milestones` and `delivery_roadmap`, do not invent dates or durations that no
+input supports; describe the SEQUENCE and what gates each transition, and say that the
+calendar is set at kickoff.
+
 - **`diagram_captions`**: write each value as the FIGURE TITLE ONLY, for example `"Container Diagram: Booking Service"` (no `"Figure 3: "` prefix). `build_docx.py` wraps it with a Word SEQ field so the figure number is computed by Word automatically when the file opens. This keeps Section 2 diagrams (Figures 1–N, per project) and Section 3's verbatim diagrams (Figures N+1 onwards) renumbered correctly no matter how many diagrams a given project has. Match the diagram slugs you set in `diagrams.json` for `target_heading` so the caption attaches to the right image.
 
 ## Agent C — template-setup

@@ -608,6 +608,44 @@ def insert_image_after_heading(doc, heading_text: str, png_path: Path,
     return True
 
 
+# The bid sections an RFP normally asks for beyond the technical solution itself
+# (Appendix-C style: team, delivery plan, support and SLAs, risks, references,
+# contractual exceptions). Every one is OPTIONAL: the template carries the heading
+# and a {{KEY}} slot, and anything left null or absent is removed at build time, so
+# a project that does not need a section sees no trace of it. This is what lets a
+# PM fill in only the sections a given client actually asked for.
+#   (H3 heading, [(H5 subheading or None, content key), ...])
+OPTIONAL_SECTION_GROUPS = [
+    ("SECURITY & DATA PROTECTION", [
+        (None, "security_data_protection"),
+    ]),
+    ("PROJECT TEAM", [
+        ("Team Structure", "team_structure"),
+        ("Roles & Responsibilities", "team_roles"),
+        ("Engagement Model", "team_engagement_model"),
+    ]),
+    ("DELIVERY PLAN & GOVERNANCE", [
+        ("Delivery Roadmap", "delivery_roadmap"),
+        ("Milestones & Acceptance", "delivery_milestones"),
+        ("Governance & Reporting", "delivery_governance"),
+    ]),
+    ("SUPPORT & SERVICE LEVELS", [
+        ("Support Model", "support_model"),
+        ("Service Level Targets", "service_levels"),
+    ]),
+    ("ASSUMPTIONS, DEPENDENCIES & RISKS", [
+        ("Assumptions & Dependencies", "assumptions_dependencies"),
+        ("Key Risks & Mitigations", "risk_register"),
+    ]),
+    ("CONTRACTUAL EXCEPTIONS", [
+        (None, "contractual_exceptions"),
+    ]),
+]
+# "References" lives inside the existing CASE STUDY section, so it is dropped on its
+# own rather than as part of a group.
+OPTIONAL_SUBSECTIONS = [("References", "references")]
+
+
 def drop_section_if_empty(doc, heading_text: str, mapping: dict, content_key: str | None = None) -> bool:
     """If the value for the section's content key is null/empty, remove the heading
     and any following paragraphs up to the next heading at same-or-higher level.
@@ -1602,6 +1640,25 @@ def build(template: Path, replacements: dict, diagrams: list, out: Path) -> None
     if "techstack_ai" not in rendered_tech:
         drop_specs.append(("AI", "techstack_ai"))
     dropped = 0
+
+    # The RFP-driven sections (team, delivery plan, support, risks, references,
+    # contractual exceptions) are all OPTIONAL. Drop the whole H3 when every one of
+    # its subsections is empty; otherwise keep the H3 and drop only the empty
+    # subsections. Order matters: the H3 pass must run first, because dropping an
+    # H3 also removes its children and a later child drop would then find nothing.
+    for h3_heading, children in OPTIONAL_SECTION_GROUPS:
+        keys = [key for _sub, key in children]
+        if all(replacements.get(k) in (None, "", "null", []) for k in keys):
+            if drop_section_if_empty(doc, h3_heading, replacements, keys[0]):
+                dropped += 1
+            continue
+        for sub, key in children:
+            if sub and drop_section_if_empty(doc, sub, replacements, key):
+                dropped += 1
+    for sub, key in OPTIONAL_SUBSECTIONS:
+        if drop_section_if_empty(doc, sub, replacements, key):
+            dropped += 1
+
     for heading_text, ckey in drop_specs:
         if drop_section_if_empty(doc, heading_text, replacements, ckey):
             dropped += 1
