@@ -43,6 +43,16 @@ senior-SA-grade diagram (sharp PNG + editable `.drawio` + `.docx`).
 
 Deploy: `cd diagram && python tools/deploy.py`
 
+### `wbs-estimate/` — `/linhpham-wbs`
+Turns a folder of bid documents into a Work Breakdown Structure with man-hour
+estimates, plus a cloud cost estimation workbook where infrastructure is in scope.
+Fills a client-supplied WBS without touching its structure, or authors the breakdown
+from an RFP, detecting which on its own: ingest → analyze → confirm gate → estimate
+with an explicit factor layer → build → verify → report. The gate proves requirement
+coverage and refuses a workbook that would render clipped on SharePoint.
+
+Deploy: `cd wbs-estimate && python tools/deploy.py`
+
 ### `webapp/` — the shared web app ("AI Workflow Studio")
 A local browser UI over the skills. When you create a workspace you pick its type
 (**diagram** or **technical proposal**), then: refine/analyze → confirm at a gate →
@@ -97,8 +107,12 @@ accurate — the intelligence is in the enforced rules, not in re-reading the lo
 .
 ├─ technical-proposal/   # /linhpham-technicalproposal skill + tools + templates
 ├─ diagram/              # /linhpham-diagram skill + tools
-└─ webapp/               # "AI Workflow Studio" — shared local web app over both skills
+├─ wbs-estimate/         # /linhpham-wbs skill + tools
+└─ webapp/               # "AI Workflow Studio" — shared local web app over the skills
 ```
 
 Each skill folder keeps its own `deploy.*`, `.gitignore`, and `LESSONS_LEARNED.md`,
-so the two skills stay fully independent inside one repository.
+so the skills stay fully independent inside one repository.
+
+The web app currently drives the technical-proposal and diagram skills; `wbs-estimate`
+runs from Claude Code and is wired into the UI next.
