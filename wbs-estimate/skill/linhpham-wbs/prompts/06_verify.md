@@ -4,14 +4,31 @@
 python scripts/verify_wbs.py --spec wbs.json --xlsx "WBS_<Project>.xlsx" | tee _verify.txt
 ```
 
-**The estimate is not finished until this exits 0.** Do not report the hours, do not
+And when a cost workbook was produced, it gets its own gate. **Re-fetch the prices
+first**, into a file separate from the one the sizing was built against, so the gate is
+comparing the estimate to the vendor and not to itself:
+
+```
+python scripts/cloud_prices.py --provider <aws|azure> --region <region> \n       --out prices_recheck.json
+python scripts/verify_cost.py --sizing sizing.json \n       --xlsx "Cost Estimation - <Project>.xlsx" \n       --prices prices_recheck.json | tee _verify_cost.txt
+python scripts/calibrate_cost.py --sizing sizing.json \n       --xlsx "Cost Estimation - <Project>.xlsx" --prices prices_recheck.json
+```
+
+Omitting `--prices` does not skip the freshness checks, it FAILS them. A list price
+carried forward under today’s date is the one defect a reader cannot possibly spot,
+and a freshness check that quietly does nothing reads as evidence the prices were
+confirmed. The workbook itself proves nothing either: openpyxl writes formulas with no
+cached results, so `verify_cost.py` evaluates every one of them the way Excel will.
+
+**The estimate is not finished until these exit 0.** Do not report the hours, do not
 summarise the modules, do not tell the user it is ready while a check is failing.
 
 ## What it proves, and what it cannot
 
 It proves: every mandatory requirement reaches a task; no task claims a requirement that
-does not exist; whole hours throughout; section rows carry no value of their own so no
-total can double-count; deliberate zeros are actually zero and their rows are still there;
+does not exist; whole hours throughout; every section row totals its
+DIRECT children and no effort cell sums a vertical range, so no figure can count the
+same hours twice; the cover reads single cells and never a range; deliberate zeros are actually zero and their rows are still there;
 every row has a stamped height; every column header fits.
 
 It cannot prove the hours are right. That is what the analysis, the reference figures and

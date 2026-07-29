@@ -42,6 +42,18 @@ DEFAULT_LABELS = {'ui': 'UI/UX Design', 'be': 'Back-end Development',
                   'fe': 'Front-end Development', 'mob': 'Mobile', 'ai': 'AI'}
 
 
+SITUATION_FACTOR = {
+    'existing client': (0.90, 0.90),
+    'follow-on': (0.90, 0.90),
+    'new client': (0.85, 0.90),
+    'many vendors bidding': (0.85, 0.90),
+    'sole bidder': (0.95, 1.00),
+    'referral': (0.95, 1.00),
+    'exclusive': (0.95, 1.00),
+    'complex, few vendors capable': (0.95, 1.00),
+}
+
+
 # ------------------------------------------------------------------ factor layer
 def apply_factors(spec):
     """Explicit uplifts, then the selective uncertainty factor, then deliberate zeros."""
@@ -94,13 +106,41 @@ def apply_factors(spec):
         log.append(('zero', 'module ' + str(m), '', out, 0, 'absorbed',
                     '%d row(s), kept so the scope stays visible' % len(rows_)))
 
-    comp = spec.get('competitive', 1.0)
+    # Section 1 of the rules puts the competitive factor INSIDE the standard formula:
+    # base x AI x competitive is the number the client is given. Leaving it at 1.0 by
+    # default is how a bid is lost to a cheaper vendor, so when the spec does not set it
+    # the situation table decides, and the floors below stop it going too far.
+    comp = spec.get('competitive')
+    if comp is None:
+        sit = str(spec.get('bid_situation') or '').lower()
+        for key, (lo, hi) in SITUATION_FACTOR.items():
+            if key in sit:
+                comp = hi          # the cautious end of the range the table gives
+                break
+        comp = comp or 1.0
+    # Write it back, or the factor log and the competitive position report different
+    # numbers in the same run and neither is obviously the wrong one.
+    spec['competitive'] = comp
     if comp and comp != 1.0:
+        before = sum(r.get(c) or 0 for r in wbs_schema.leaf_rows(spec) for c in cols)
         for r in wbs_schema.leaf_rows(spec):
             for c in cols:
                 if r.get(c):
                     r[c] = max(1, int(r[c] * comp + 0.5))
-        log.append(('competitive', 'all', '', 0, 0, 'x%.2f' % comp, 'commercial discount'))
+        after = sum(r.get(c) or 0 for r in wbs_schema.leaf_rows(spec) for c in cols)
+        # A percentage applied per task, to whole hours, mostly does not survive the
+        # rounding. Half-up rounding leaves 1 to 5 hours untouched at x0.90, and a
+        # well-formed WBS has most tasks in exactly that band, so the intended discount
+        # can arrive as almost nothing. Recording what was actually realised is the
+        # difference between giving a discount and believing you gave one.
+        realised = (1 - after / before) if before else 0.0
+        spec['_competitive_realised'] = realised
+        spec['_competitive_before'] = before
+        log.append(('competitive', 'all', '', before, after, 'x%.2f' % comp,
+                    'intended -%.0f%%, realised -%.1f%%  (%s)'
+                    % ((1 - comp) * 100, realised * 100,
+                       spec.get('bid_situation') or 'situation not stated')))
+    apply_floors(spec, log)
     return log
 
 
@@ -119,6 +159,177 @@ def print_factor_log(log, comp):
     print()
     print('Competitive factor: x%.2f%s'
           % (comp, '' if comp != 1.0 else '  (hours not discounted)'))
+    print()
+
+
+
+# Section 1 of the rules: the floors are what protect the margin, not refusing the discount.
+# Below these a task has no room for its own testing, so the saving is borrowed from quality.
+FLOOR_RULES = (
+    (('auth', 'login', 'sign-in', 'sso', 'oauth', 'mfa', 'otp', 'password'), 6,
+     'security work is not cut'),
+    (('integrat', 'gateway', 'webhook', 'connector', 'api of', 'third-part', 'soap',
+      'sftp', 'erp', 'hrms'), 6, 'retry, error handling and rate limits'),
+    (('infrastructur', 'landing zone', 'pipeline', 'cluster', 'network', 'terraform',
+      'iac', 'environment'), 4, 'wrong infrastructure takes the project down'),
+    ((), 3, 'under three hours leaves no room to test'),
+)
+
+
+def floor_for(row):
+    text = ' '.join(str(row.get(k) or '') for k in ('feature', 'group', 'desc')).lower()
+    for words, floor, why in FLOOR_RULES:
+        if not words:
+            return floor, why
+        if any(w in text for w in words):
+            return floor, why
+    return 3, 'under three hours leaves no room to test'
+
+
+def apply_floors(spec, log):
+    """Raise any leaf the competitive factor pushed under its floor.
+
+    The competitive factor is applied to win the work; the floors are applied so winning it
+    is still worth having. They are not in tension: one moves the price, the other refuses to
+    move the part of the estimate that pays for testing the work.
+    """
+    cols = spec['columns']
+    zero = set(spec.get('zero_columns') or [])
+    zmods = {str(m) for m in (spec.get('zero_modules') or [])}
+    for row in wbs_schema.leaf_rows(spec):
+        if wbs_schema.module_of(row) in zmods:
+            continue
+        live = [c for c in cols if c not in zero and (row.get(c) or 0)]
+        total = sum(row.get(c) or 0 for c in live)
+        if not total:
+            continue
+        floor, why = floor_for(row)
+        if total >= floor:
+            continue
+        biggest = max(live, key=lambda c: row.get(c) or 0)
+        row[biggest] += floor - total
+        log.append(('floor', row['id'], biggest, total, floor, '>=%dh' % floor, why))
+
+
+# ------------------------------------------------------- competitive position
+
+
+def competitive_position(spec, total):
+    """What makes this number competitive, in figures rather than adjectives.
+
+    A percentage taken off the hours is the weakest lever available and the only one that
+    cannot be undone later. The strong levers are already in the estimate and normally go
+    unstated: the discount the delivery model has already granted, and the work quoted once
+    instead of once per product. Both are computed here so they can be quoted in the bid
+    instead of reconstructed by hand afterwards.
+
+    Returns (client_facing_lines, internal_lines).
+    """
+    client, internal = [], []
+    cols = spec['columns']
+
+    ai = spec.get('ai_factor') or {}
+    blended = ai.get('blended')
+    if ai.get('where') != 'none' and blended:
+        pre = total / blended
+        granted = int(round(pre - total))
+        internal.append(('Delivery-model discount already granted',
+                         '%d h  (effective x%.2f, %s). Applied %s, so it must not be taken '
+                         'again' % (granted, blended, ai.get('note', 'per task type'),
+                                    'inside the base numbers'
+                                    if ai.get('where') == 'in_base' else 'as factor entries')))
+
+    reuse = spec.get('reuse') or {}
+    shared = [n for n in (reuse.get('shared_sheets') or [])]
+    consumers = reuse.get('consumers') or 0
+    if shared and consumers > 1:
+        sheet_mods = {}
+        for sh in spec['sheets']:
+            sheet_mods[sh['name']] = {str(m) for m in sh['modules']}
+        shared_mods = set()
+        for n in shared:
+            shared_mods |= sheet_mods.get(n, set())
+        shared_h = sum(r.get(c) or 0 for r in wbs_schema.leaf_rows(spec) for c in cols
+                       if wbs_schema.module_of(r) in shared_mods)
+        saved = shared_h * (consumers - 1)
+        naive = total + saved
+        client.append(('Shared platform quoted once, not %d times' % consumers,
+                       '%d h of shared work serves %d products, so %d h are not charged'
+                       % (shared_h, consumers, saved)))
+        if naive:
+            client.append(('Against a build with no reuse',
+                           '%d h. This estimate is %.0f%% of it' % (naive, 100.0 * total / naive)))
+
+    comp = spec.get('competitive', 1.0)
+    sit = str(spec.get('bid_situation') or '').strip()
+    lo = hi = None
+    for key, (a, b) in SITUATION_FACTOR.items():
+        if key in sit.lower():
+            lo, hi = a, b
+            break
+    line = 'x%.2f' % comp
+    if lo is not None:
+        line += '. The situation "%s" suggests x%.2f to x%.2f' % (sit, lo, hi)
+        if comp > hi:
+            line += '. HOLDING ABOVE THE RANGE: say why in the report, or take the discount'
+    internal.append(('Competitive factor', line))
+    realised = spec.get('_competitive_realised')
+    if realised is not None and comp < 1.0:
+        intended = 1 - comp
+        internal.append(('Discount actually realised',
+                         '-%.1f%% of %d h, against -%.0f%% intended'
+                         % (realised * 100, spec.get('_competitive_before') or 0,
+                            intended * 100)))
+        if realised < intended * 0.5:
+            internal.append(('WHY THE DISCOUNT DID NOT LAND',
+                             'whole-hour rounding absorbed it: at this factor a task '
+                             'of 1 to 5 hours does not move, and most tasks are in '
+                             'that band. A percentage cannot be expressed per task on '
+                             'a fine-grained WBS. Take it as a stated discount on the '
+                             'total, on the rate, or by moving scope into phase 1, and '
+                             'do not report a reduction the hours do not contain'))
+    return client, internal
+
+
+def phase1_total(spec):
+    """Hours in the cheaper option. A subset of the same ids, so the two options can never
+    disagree about what a task costs."""
+    p1 = spec.get('phase1') or {}
+    inc = [str(x) for x in (p1.get('include') or [])]
+    if not inc:
+        return None, None
+    cols = spec['columns']
+    rows = [r for r in wbs_schema.leaf_rows(spec)
+            if any(str(r['id']) == p or str(r['id']).startswith(p + '.') for p in inc)]
+    return sum(r.get(c) or 0 for r in rows for c in cols), len(rows)
+
+
+def print_competitive_position(spec, total):
+    client, internal = competitive_position(spec, total)
+    if not (client or internal):
+        return
+    print('=' * 96)
+    print('COMPETITIVE POSITION  (the figures that argue the price, not adjectives)')
+    print('=' * 96)
+    for label, value in client:
+        print('  [bid]      %-44s %s' % (label, value))
+    for label, value in internal:
+        print('  [internal] %-44s %s' % (label, value))
+    p1, n1 = phase1_total(spec)
+    if p1:
+        # Only printed when the spec actually defines one. Offering a cut-down option is
+        # a commercial choice, so the build states it when asked and stays quiet when not.
+        p1o = spec['phase1']
+        print()
+        print('    Full scope   %6d h   %d task(s)'
+              % (total, len(wbs_schema.leaf_rows(spec))))
+        print('    %-12s %6d h   %d task(s)   %.0f%% of full'
+              % (p1o.get('name', 'phase 1')[:12], p1, n1, 100.0 * p1 / total))
+        print('    gives up: %s' % p1o.get('note', ''))
+    print()
+    print('  [bid] lines may be quoted to the client. [internal] lines are grounds for')
+    print('  defending the number and are deliberately kept out of the workbook: a delivery')
+    print('  discount a client can see is a discount they will ask for twice.')
     print()
 
 
@@ -225,6 +436,7 @@ def build_sheet(ws, spec, modules):
         ws.merge_cells(start_row=a, start_column=2, end_row=b, end_column=2)
 
     last = r - 1
+    l1_rows = apply_rollup(ws, first_eff, n_eff, total_col, last)
     style(ws.cell(r, 1), rgb=C_TOTAL)
     ws.cell(r, 2, 'TOTAL')
     style(ws.cell(r, 2), rgb=C_TOTAL, bold=True, align=A_LEFT_CENTER)
@@ -234,7 +446,9 @@ def build_sheet(ws, spec, modules):
     ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=5)
     for c in range(first_eff, first_eff + n_eff):
         letter = get_column_letter(c)
-        ws.cell(r, c, '=SUM(%s3:%s%d)' % (letter, letter, last))
+        # Summing 3:last would now count every hour at task, group and module level.
+        ws.cell(r, c, '=' + '+'.join('%s%d' % (letter, x) for x in l1_rows)
+                if l1_rows else '=SUM(%s3:%s%d)' % (letter, letter, last))
         style(ws.cell(r, c), rgb=C_TOTAL, bold=True)
     ws.cell(r, total_col, '=SUM(%s%d:%s%d)' % (eff_a, r, eff_z, r))
     style(ws.cell(r, total_col), rgb=C_TOTAL, bold=True)
@@ -243,6 +457,53 @@ def build_sheet(ws, spec, modules):
     ws.row_dimensions[2].height = 36
     return {'name': ws.title, 'spans': spans, 'leaves': leaves, 'total_row': r,
             'total_col': get_column_letter(total_col), 'first_eff': first_eff}
+
+
+def apply_rollup(ws, first_eff, n_eff, total_col, last):
+    """Give every section row a total of its direct children; return the level-1 rows.
+
+    Derived from the sheet that was just written rather than threaded through the writing
+    loop, so it works the same for a module that has group rows and for one that carries its
+    tasks a level higher.
+
+    Naming each child cell is the whole point. A range would silently include the
+    grandchildren as well, which is how the same hours come to be counted at three levels
+    once section rows start carrying totals.
+    """
+    ids = []
+    for r in range(3, last + 1):
+        t = str(ws.cell(r, 1).value or '').strip()
+        if t and t[0].isdigit():
+            ids.append((r, t))
+
+    def children_of(idx):
+        row, ident = ids[idx]
+        depth = ident.count('.')
+        kids = []
+        for nxt_row, nxt_id in ids[idx + 1:]:
+            d = nxt_id.count('.')
+            if d <= depth:
+                break                      # a sibling or an uncle closes this section
+            if d == depth + 1 and nxt_id.startswith(ident + '.'):
+                kids.append(nxt_row)
+        return kids
+
+    l1_rows = []
+    for i, (row, ident) in enumerate(ids):
+        if '.' not in ident:
+            l1_rows.append(row)
+        kids = children_of(i)
+        if not kids:
+            continue                       # a leaf keeps the value it was given
+        for c in range(first_eff, first_eff + n_eff):
+            letter = get_column_letter(c)
+            ws.cell(row, c, '=' + '+'.join('%s%d' % (letter, k) for k in kids))
+            style(ws.cell(row, c), rgb=C_L1 if '.' not in ident else C_L2, bold=True)
+        ws.cell(row, total_col,
+                '=SUM(%s%d:%s%d)' % (get_column_letter(first_eff), row,
+                                     get_column_letter(first_eff + n_eff - 1), row))
+        style(ws.cell(row, total_col), rgb=C_L1 if '.' not in ident else C_L2, bold=True)
+    return l1_rows
 
 
 def column_e(item):
@@ -317,7 +578,9 @@ def build_cover(ws, spec, sheets):
             style(ws.cell(r, 1), align=A_LEFT_CENTER)
             for i in range(len(labels) + 1):
                 src = get_column_letter(sh['first_eff'] + i) if i < len(labels) else sh['total_col']
-                ws.cell(r, 2 + i, '=SUM(%s%s%d:%s%d)' % (q, src, a, src, b))
+                # `a` is the module's level-1 row, which now carries its own roll-up.
+                # Summing a:b would count the module's hours three times over.
+                ws.cell(r, 2 + i, '=%s%s%d' % (q, src, a))
                 style(ws.cell(r, 2 + i))
             r += 1
 
@@ -373,6 +636,9 @@ def main():
     spec = wbs_schema.validate(json.load(open(a.spec, encoding='utf-8')))
     log = apply_factors(spec)
     print_factor_log(log, spec.get('competitive', 1.0))
+    grand = sum(r.get(c) or 0 for r in wbs_schema.leaf_rows(spec)
+                for c in spec['columns'])
+    print_competitive_position(spec, grand)
 
     wb = Workbook()
     cover = wb.active

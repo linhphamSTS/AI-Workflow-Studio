@@ -250,14 +250,20 @@ def build_dot(spec: dict) -> str:
     node_ids = {n["id"] for n in nodes}
     node_by_id = {n["id"]: n for n in nodes}
 
-    # Edge labels and splines=ortho don't mix — Graphviz can drop a label or drop
-    # it ON a node/edge. When any edge carries a label, use spline routing, which
-    # reserves space for each label so text never lands on a node or another arrow.
+    # Edge labels and splines=ortho don't mix: Graphviz can drop a label, or land it on
+    # a node. But "spline" was the wrong fallback. Curved edges through a five-rank
+    # context diagram read as spaghetti the moment more than a few of them cross, and a
+    # reader called exactly that out. POLYLINE is the right middle ground: straight
+    # segments with bends, so the figure reads as engineering drawing rather than
+    # handwriting, and unlike ortho it still reserves space for every edge label.
+    # ordering=out keeps a node's outgoing edges in declaration order, which removes
+    # most of the crossings that made the curves look tangled in the first place.
     has_labeled_edges = any(e.get("label") for e in edges)
     lines = ["digraph G {"]
     if engine == "dot":
         lines.append(f"  rankdir={direction};")
-        lines.append('  splines=%s;' % ("spline" if has_labeled_edges else "ortho"))
+        lines.append('  splines=%s;' % ("polyline" if has_labeled_edges else "ortho"))
+        lines.append('  ordering=out;')
     else:
         lines.append('  splines=true; overlap=false;')
     lines += [

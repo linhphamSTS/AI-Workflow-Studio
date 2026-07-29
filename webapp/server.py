@@ -48,6 +48,7 @@ SKILL_DIR = REPO_ROOT / "diagram" / "skill" / "linhpham-diagram"
 SCRIPTS_DIR = SKILL_DIR / "scripts"
 # (future) proposal generation drives the sibling skill:
 PROPOSAL_SKILL_DIR = REPO_ROOT / "technical-proposal" / "skill" / "linhpham-technicalproposal"
+WBS_SKILL_DIR = REPO_ROOT / "wbs-estimate" / "skill" / "linhpham-wbs"
 # Where a user's workspaces (their inputs + generated output) live. Override with
 # DIAGRAM_WORKSPACES_DIR to keep data outside the repo, or to point tests elsewhere
 # so they never touch real data.
@@ -56,6 +57,8 @@ STATIC_DIR = WEBAPP_DIR / "static"
 REFINE_PROMPT_TMPL = WEBAPP_DIR / "refine_prompt.md"
 PROPOSAL_ANALYZE_TMPL = WEBAPP_DIR / "proposal_analyze_prompt.md"
 PROPOSAL_GENERATE_TMPL = WEBAPP_DIR / "proposal_generate_prompt.md"
+WBS_ANALYZE_TMPL = WEBAPP_DIR / "wbs_analyze_prompt.md"
+WBS_GENERATE_TMPL = WEBAPP_DIR / "wbs_generate_prompt.md"
 DIAGRAM_SELFLEARN_TMPL = WEBAPP_DIR / "diagram_selflearn_prompt.md"
 
 WORKSPACES_DIR.mkdir(parents=True, exist_ok=True)
@@ -67,6 +70,10 @@ DIAGRAM_SELFLEARN = os.environ.get("DIAGRAM_SELFLEARN", "1") == "1"     # skill 
 DIAGRAM_SELFLEARN_TIMEOUT = int(os.environ.get("DIAGRAM_SELFLEARN_TIMEOUT", "600"))
 PROPOSAL_ANALYZE_TIMEOUT = int(os.environ.get("PROPOSAL_ANALYZE_TIMEOUT", "1200"))    # 20 min
 PROPOSAL_GENERATE_TIMEOUT = int(os.environ.get("PROPOSAL_GENERATE_TIMEOUT", "3600"))  # 60 min (heavy)
+WBS_ANALYZE_TIMEOUT = int(os.environ.get("WBS_ANALYZE_TIMEOUT", "1200"))              # 20 min
+# Estimating every leaf task, fetching real prices and gating two workbooks on a verifier
+# is the longest job in the app.
+WBS_GENERATE_TIMEOUT = int(os.environ.get("WBS_GENERATE_TIMEOUT", "4200"))             # 70 min
 RENDER_TIMEOUT = int(os.environ.get("DIAGRAM_RENDER_TIMEOUT", "180"))   # per diagram
 # ingest.py's own default is 20k chars/file, which truncates a real RFP and most of a
 # WBS spreadsheet. Requirements the analysis never sees cannot end up in the proposal.
@@ -333,7 +340,29 @@ def _prior_version_block(ws_id: str, meta: dict) -> str:
         "version.** They were produced by whatever the skill could do on that date; re-rendering is\n"
         "what lets this run pick up the current renderers, DPI rules and SA-grade structure. If a\n"
         "re-render is genuinely worse than the previous version, say so in the Phase 6 report rather\n"
-        "than silently reinstating the old images."
+        "than silently reinstating the old images.\n"
+        "\n"
+        "**REUSE IS SUBORDINATE TO TWO THINGS, AND THIS OVERRIDES EVERYTHING ABOVE.** Reuse exists\n"
+        "to stop the wording drifting between iterations, not to freeze a decision the user has since\n"
+        "changed. Before reusing any prose value, check it against:\n"
+        "\n"
+        f"1. **`plan.json` as it stands right now.** It may have been edited at the gate since\n"
+        f"   version {prev['id']} was written. For EVERY prose value, verify that what it asserts\n"
+        "   still matches the current plan: the stack choices, the cloud and region, the\n"
+        "   architecture, the assumptions and the open questions. Any sentence that contradicts the\n"
+        "   current plan, or that names a technology, vendor, region or option the current plan no\n"
+        "   longer carries, must be REWRITTEN from the current plan. Do not soften it and do not\n"
+        "   keep it as an aside. A proposal that recommends one thing while a sentence elsewhere\n"
+        "   still offers the thing it replaced is a bid-level defect, and it is the single most\n"
+        "   likely way a re-run ships a contradiction.\n"
+        "2. **The phase prompts as they stand right now.** `04_generate.md` may have gained or\n"
+        "   tightened a rule since the last run: a length ceiling, a required shape (an array where\n"
+        "   there used to be prose), a mandatory field, a banned construction. Re-read it and bring\n"
+        "   every reused value into line. A reused value that breaches a current rule is a defect,\n"
+        "   not a stable choice, and the reviewer will reject it.\n"
+        "\n"
+        "State in the Phase 6 report which reused values you had to rewrite and why, so the diff\n"
+        "between versions is explained rather than mysterious."
     )
 
 
@@ -379,17 +408,44 @@ def _sections_block(ws_id: str) -> str:
     return "\n".join(lines)
 
 
+def _wbs_mode_block(meta: dict) -> str:
+    """State the mode the user chose, so the run does not have to guess it.
+
+    The skill can detect the situation on its own, and it still should as a cross-check, but
+    the user was asked at creation time and their answer is the authority. A run that decides
+    for itself can decide differently from what the person expects, and the difference is not
+    a detail: one job leaves the client's workbook alone, the other writes a new one.
+    """
+    mode = (meta.get("wbs_mode") or "").strip().lower()
+    if mode == "fill":
+        return ("MODE: **FILL**. The user has stated that the client supplied a WBS. Find it in "
+                "the inputs, treat its structure, wording and styling as the deliverable, and "
+                "write only the effort columns, with `scripts/fill_wbs.py`. Do not author a "
+                "breakdown. If no client workbook is in the inputs, stop and say so rather "
+                "than switching to author mode: the user asked for one job, not the other.")
+    if mode == "author":
+        return ("MODE: **AUTHOR**. The user has stated that there is no client WBS. Design the "
+                "breakdown from the documents, then estimate it, then build it with "
+                "`scripts/build_wbs.py`. If the inputs do turn out to contain a client "
+                "workbook, say so in the plan before building, because filling theirs is "
+                "usually what a client wants.")
+    return ("MODE: not stated. Detect it from the inputs and say in the plan which one you "
+            "found and why, before building anything.")
+
+
 def _fill_proposal_prompt(tmpl_path: Path, ws_id: str, meta: dict, output_dir: Path | None = None) -> str:
     d = WORKSPACES_DIR / ws_id
     fwd = lambda p: str(p).replace("\\", "/")
     filled = (tmpl_path.read_text(encoding="utf-8")
               .replace("{{WORKSPACE_DIR}}", fwd(d))
               .replace("{{PROPOSAL_SKILL_DIR}}", fwd(PROPOSAL_SKILL_DIR))
+              .replace("{{WBS_SKILL_DIR}}", fwd(WBS_SKILL_DIR))
               .replace("{{OUTPUT_DIR}}", fwd(output_dir) if output_dir else fwd(d / "output"))
               .replace("{{PRIOR_VERSION}}", _prior_version_block(ws_id, meta))
               .replace("{{SECTIONS}}", _sections_block(ws_id))
               .replace("{{FOLDER}}", meta.get("folder", "") or "(none; use the uploaded inputs / digest)")
-              .replace("{{PROMPT_TEXT}}", meta.get("prompt", "") or "(no extra context)"))
+              .replace("{{PROMPT_TEXT}}", meta.get("prompt", "") or "(no extra context)")
+              .replace("{{WBS_MODE}}", _wbs_mode_block(meta)))
     # A placeholder that survives substitution reaches the model as literal "{{KEY}}" and is
     # silently ignored — the run then quietly loses whatever that block was meant to say.
     leftover = sorted(set(re.findall(r"\{\{[A-Z_]+\}\}", filled)))
@@ -477,7 +533,8 @@ def _run_claude(ws_id: str, prompt: str, timeout: int, label: str,
     d = WORKSPACES_DIR / ws_id
     cmd = [CLAUDE, "-p", prompt, "--output-format", "stream-json", "--verbose",
            "--permission-mode", "bypassPermissions"]
-    for extra in (add_dirs if add_dirs is not None else [PROPOSAL_SKILL_DIR, SKILL_DIR]):
+    for extra in (add_dirs if add_dirs is not None
+                  else [PROPOSAL_SKILL_DIR, WBS_SKILL_DIR, SKILL_DIR]):
         cmd += ["--add-dir", str(extra)]
     if REFINE_MODEL:
         cmd += ["--model", REFINE_MODEL]
@@ -586,6 +643,146 @@ def analyze_job(ws_id: str):
         set_status(ws_id, "error", error=f"analyze timed out after {PROPOSAL_ANALYZE_TIMEOUT}s")
     except Exception as e:  # noqa: BLE001
         _finish_job(ws_id, "analyze", e)
+    finally:
+        with JOBS_LOCK:
+            JOBS.get(ws_id, {})["running"] = False
+
+
+
+def wbs_analyze_job(ws_id: str):
+    """WBS analyze: run the skill's Phase 0-3 head-less -> spec/wbs_plan.json, stop at the gate.
+
+    The gate exists because the module structure, the column set and the factor stack are
+    cheap to change now and expensive once 250 rows carry numbers.
+    """
+    try:
+        meta = read_meta(ws_id)
+        d = WORKSPACES_DIR / ws_id
+        (d / "spec").mkdir(parents=True, exist_ok=True)
+        inp = d / "inputs"
+        has_docs = (inp.exists() and any(inp.iterdir())) or (
+            meta.get("folder") and Path(meta["folder"]).exists())
+        # Same webapp-side workaround as the proposal type: the skill needs documents to
+        # ingest, so a prompt-only workspace gets its prompt captured as one.
+        if not has_docs and (meta.get("prompt") or "").strip():
+            inp.mkdir(parents=True, exist_ok=True)
+            (inp / "requirements.md").write_text(
+                "# Project requirements\n\n"
+                "_(Provided directly as a prompt; no source bid documents were supplied.)_\n\n"
+                + meta["prompt"].strip() + "\n", encoding="utf-8")
+            job_log(ws_id, "  (no docs supplied - captured your prompt as inputs/requirements.md)")
+        sources = []
+        if inp.exists() and any(inp.iterdir()):
+            sources.append(inp)
+        if meta.get("folder") and Path(meta["folder"]).exists():
+            sources.append(Path(meta["folder"]))
+        if sources:
+            run_ingest(ws_id, sources[0])
+        plan = d / "spec" / "wbs_plan.json"
+        if plan.exists():
+            plan.unlink()
+        prompt = _fill_proposal_prompt(WBS_ANALYZE_TMPL, ws_id, meta)
+        (d / "spec" / "_wbs_analyze_prompt.md").write_text(prompt, encoding="utf-8")
+        job_log(ws_id, "  [reading the bid folder, detecting fill or author mode, designing the "
+                       "breakdown and the factor stack - a few minutes]")
+        _run_claude(ws_id, prompt, WBS_ANALYZE_TIMEOUT, "wbs analyze")
+        if not plan.exists():
+            raise RuntimeError("analyze finished but spec/wbs_plan.json was not written "
+                               "(check the log)")
+        data = json.loads(plan.read_text(encoding="utf-8"))
+        mods = data.get("modules") or []
+        set_status(ws_id, "refined", error="", n_diagrams=len(mods))
+        cloud = (data.get("cloud") or {})
+        job_log(ws_id, "OK analyze -> %s mode, %d module(s), cloud %s/%s"
+                % (data.get("mode", "?"), len(mods),
+                   cloud.get("provider", "?"), cloud.get("region", "?")))
+    except subprocess.TimeoutExpired:
+        set_status(ws_id, "error", error=f"analyze timed out after {WBS_ANALYZE_TIMEOUT}s")
+    except Exception as e:  # noqa: BLE001
+        _finish_job(ws_id, "analyze", e)
+    finally:
+        with JOBS_LOCK:
+            JOBS.get(ws_id, {})["running"] = False
+
+
+def wbs_generate_job(ws_id: str):
+    """WBS generate: Phase 4-7 head-less -> the work breakdown AND the cost estimation.
+
+    Two workbooks, not one. A bid needs the hours and the running cost, and the cost sheet is
+    the one that must never carry an invented price, so the wrapper prompt makes the fetch
+    sequence mandatory.
+    """
+    try:
+        d = WORKSPACES_DIR / ws_id
+        plan = d / "spec" / "wbs_plan.json"
+        if not plan.exists():
+            raise RuntimeError("no plan to estimate from; analyze first")
+        meta = read_meta(ws_id)
+        vid = max((v["id"] for v in meta.get("versions", [])), default=0) + 1
+        out = _versions_dir(ws_id) / str(vid)
+        out.mkdir(parents=True, exist_ok=True)
+        prompt = _fill_proposal_prompt(WBS_GENERATE_TMPL, ws_id, meta, output_dir=out)
+        (d / "spec" / "_wbs_generate_prompt.md").write_text(prompt, encoding="utf-8")
+        job_log(ws_id, "  [estimating every leaf task, fetching real cloud prices, building and "
+                       "verifying both workbooks - this can take 20-60 min]")
+        _run_claude(ws_id, prompt, WBS_GENERATE_TIMEOUT, "wbs generate")
+
+        books = sorted(out.glob("*.xlsx"))
+        if not books:
+            # The skill may have written to its natural output/ location; adopt it.
+            stray = d / "output"
+            if any(stray.glob("*.xlsx")):
+                for p in list(stray.glob("*")):
+                    if p.name == "versions":
+                        continue
+                    dest = out / p.name
+                    if p.is_dir():
+                        shutil.copytree(p, dest, dirs_exist_ok=True)
+                        shutil.rmtree(p, ignore_errors=True)
+                    else:
+                        shutil.move(str(p), str(dest))
+                books = sorted(out.glob("*.xlsx"))
+        if not books:
+            raise RuntimeError("generate finished but no .xlsx was produced (check the log)")
+
+        def pick(*needles):
+            for b in books:
+                low = b.name.lower()
+                if all(n in low for n in needles):
+                    return b.name
+            return None
+
+        wbs_name = pick("wbs") or books[0].name
+        cost_name = pick("cost") or (books[1].name if len(books) > 1 else None)
+        if not cost_name:
+            # Not fatal, but it is half a deliverable and the report must say so.
+            job_log(ws_id, "  ! no cost estimation workbook was produced - the run is incomplete")
+
+        report = ""
+        rp = out / "_report.md"
+        if rp.exists():
+            report = rp.read_text(encoding="utf-8")[:2000]
+
+        meta = read_meta(ws_id)
+        prev = (meta.get("versions") or [])[-1] if meta.get("versions") else None
+        source = "Initial" if not prev else (
+            "Re-analyzed inputs" if (prev.get("prompt", "") != meta.get("prompt", "")
+                                     or prev.get("folder", "") != meta.get("folder", ""))
+            else "Regenerated")
+        record = {"id": vid, "created": _now(), "source": source, "kind": "wbs",
+                  "prompt": meta.get("prompt", ""), "folder": meta.get("folder", ""),
+                  "wbs": wbs_name, "cost": cost_name,
+                  "workbooks": [b.name for b in books], "report": report}
+        versions = meta.get("versions") or []
+        versions.append(record)
+        set_status(ws_id, "generated", error="", versions=versions,
+                   current_version=vid, n_diagrams=len(books))
+        job_log(ws_id, "OK wbs v%d -> %s%s" % (vid, wbs_name,
+                                               (" + " + cost_name) if cost_name else ""))
+    except subprocess.TimeoutExpired:
+        set_status(ws_id, "error", error=f"generate timed out after {WBS_GENERATE_TIMEOUT}s")
+    except Exception as e:  # noqa: BLE001
+        _finish_job(ws_id, "generate", e)
     finally:
         with JOBS_LOCK:
             JOBS.get(ws_id, {})["running"] = False
@@ -850,7 +1047,18 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    """Serve the shell with a cache-busting stamp on app.js and style.css.
+
+    Without this, a browser holding an older app.js keeps serving it after the
+    app is updated, and the user sees a stale UI with no way to tell. That is
+    indistinguishable from a missing feature, so the stamp is not cosmetic.
+    """
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    for asset in ("app.js", "style.css"):
+        f = STATIC_DIR / asset
+        stamp = int(f.stat().st_mtime) if f.exists() else 0
+        html = html.replace("/static/%s" % asset, "/static/%s?v=%d" % (asset, stamp))
+    return html
 
 
 def _claude_health() -> dict:
@@ -902,15 +1110,27 @@ def list_workspaces():
 async def create_workspace(payload: dict):
     name = (payload.get("name") or "Untitled").strip()[:80]
     wtype = (payload.get("type") or "diagram").strip().lower()
-    if wtype not in ("diagram", "proposal"):
-        raise HTTPException(400, "type must be 'diagram' or 'proposal'")
+    if wtype not in ("diagram", "proposal", "wbs"):
+        raise HTTPException(400, "type must be 'diagram', 'proposal' or 'wbs'")
+    # An estimate is one of two jobs and they are not interchangeable. FILL puts hours
+    # into a workbook the client already wrote and leaves their structure alone; AUTHOR
+    # designs the breakdown first. Asking up front avoids discovering halfway through
+    # that the wrong one was assumed.
+    wbs_mode = (payload.get("wbs_mode") or "").strip().lower()
+    if wtype == "wbs":
+        if wbs_mode not in ("fill", "author"):
+            raise HTTPException(400, "wbs_mode must be 'fill' or 'author'")
+    else:
+        wbs_mode = ""
     ws_id = uuid.uuid4().hex[:12]
     d = WORKSPACES_DIR / ws_id
     (d / "inputs").mkdir(parents=True, exist_ok=True)
     (d / "spec").mkdir(parents=True, exist_ok=True)
     (d / "output" / "diagrams").mkdir(parents=True, exist_ok=True)
-    meta = {"id": ws_id, "name": name, "type": wtype, "created": _now(),
-            "mode": "folder" if wtype == "proposal" else "text",
+    meta = {"id": ws_id, "name": name, "type": wtype, "wbs_mode": wbs_mode,
+            "created": _now(),
+            # A WBS is estimated from bid documents, so it opens in folder mode like a proposal.
+            "mode": "folder" if wtype in ("proposal", "wbs") else "text",
             "prompt": "", "folder": "", "status": "new", "error": ""}
     write_meta(ws_id, meta)
     return meta
@@ -1036,7 +1256,9 @@ def pick_folder():
 @app.post("/api/workspaces/{ws_id}/refine")
 def refine(ws_id: str):
     meta = read_meta(ws_id)
-    is_proposal = meta.get("type") == "proposal"
+    wtype = meta.get("type")
+    is_proposal = wtype == "proposal"
+    is_wbs = wtype == "wbs"
     has_docs = bool(meta.get("folder")) or bool(list((WORKSPACES_DIR / ws_id / "inputs").glob("*")))
     has_prompt = bool((meta.get("prompt") or "").strip())
     if not has_docs and not has_prompt:
@@ -1050,8 +1272,26 @@ def refine(ws_id: str):
     if not h["logged_in"]:
         raise HTTPException(400, "You're not signed in to 'claude'. Run `claude auth login` in a terminal, "
                                  "then reload and try again.")
-    start_job(ws_id, "refine", analyze_job if is_proposal else refine_job)
+    start_job(ws_id, "refine",
+              wbs_analyze_job if is_wbs else (analyze_job if is_proposal else refine_job))
     return {"status": "refining"}
+
+
+@app.get("/api/workspaces/{ws_id}/wbs-plan")
+def get_wbs_plan(ws_id: str):
+    pf = ws_dir(ws_id) / "spec" / "wbs_plan.json"
+    if not pf.exists():
+        raise HTTPException(404, "no plan yet")
+    return JSONResponse(json.loads(pf.read_text(encoding="utf-8")))
+
+
+@app.put("/api/workspaces/{ws_id}/wbs-plan")
+async def put_wbs_plan(ws_id: str, payload: dict):
+    ws_dir(ws_id)
+    (WORKSPACES_DIR / ws_id / "spec" / "wbs_plan.json").write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    set_status(ws_id, "refined", n_diagrams=len(payload.get("modules") or []))
+    return {"ok": True}
 
 
 @app.get("/api/workspaces/{ws_id}/manifest")
@@ -1076,6 +1316,15 @@ async def put_manifest(ws_id: str, payload: dict):
 @app.post("/api/workspaces/{ws_id}/generate")
 def generate(ws_id: str):
     meta = read_meta(ws_id)
+    if meta.get("type") == "wbs":
+        if not (ws_dir(ws_id) / "spec" / "wbs_plan.json").exists():
+            raise HTTPException(400, "analyze first (no plan)")
+        h = _claude_health()
+        if not h["claude_installed"] or not h["logged_in"]:
+            raise HTTPException(400, "Estimating a WBS needs the signed-in 'claude' CLI "
+                                     "(run `claude auth login`), then reload.")
+        start_job(ws_id, "generate", wbs_generate_job)
+        return {"status": "generating"}
     if meta.get("type") == "proposal":
         if not (ws_dir(ws_id) / "spec" / "plan.json").exists():
             raise HTTPException(400, "analyze first (no plan)")
@@ -1110,7 +1359,8 @@ async def put_plan(ws_id: str, payload: dict):
 
 _MEDIA = {"png": "image/png", "svg": "image/svg+xml", "drawio": "application/xml",
           "json": "application/json",
-          "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+          "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
 
 
 def _current_vid(meta: dict) -> int | None:
@@ -1194,5 +1444,6 @@ if __name__ == "__main__":
     port = int(os.environ.get("DIAGRAM_PORT", "8000"))
     print(f"AI Workflow Studio -> http://{host}:{port}")
     print(f"  skill: {SKILL_DIR}")
+    print(f"  wbs skill: {WBS_SKILL_DIR}")
     print(f"  claude: {CLAUDE}  (model: {REFINE_MODEL or 'default'})")
     uvicorn.run(app, host=host, port=port, log_level="info")

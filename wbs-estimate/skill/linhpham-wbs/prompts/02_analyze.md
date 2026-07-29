@@ -15,6 +15,39 @@ nobody can defend, including you.
 - **Who the users are.** Every distinct role is screens, permissions and probably its own
   console.
 
+## THE CLOUD IS DERIVED FROM THE REQUIREMENTS, NEVER DEFAULTED
+
+`cloud_prices.py` reads both AWS and Azure. That is so the estimate can price whichever
+platform the requirements point at, **not** so one of them becomes the habit. Do not open
+this phase with a provider already in mind, and do not carry one over from the last project.
+
+Decide on signals a client can check, in this order:
+
+1. **Residency or sovereignty stated as mandatory.** Which providers have a region in the
+   required country at all? A provider with none is eliminated on eligibility, not on price.
+2. **How many in-country regions.** If recovery may not cross the border, a single in-country
+   region means a whole-region failure has no standby. Two changes the architecture.
+3. **Whether the services the requirements need exist in that region.** Run
+   `--probe` for each candidate. On one UAE bid the deciding fact was that one provider had
+   no in-region model inference at any price while the other did, which settled a mandatory
+   clause rather than a cost comparison.
+4. **Certification or accreditation the requirements name**, and any platform the client
+   already operates, if an input actually says so.
+
+**Never decide on:** our team knows it, we have a partnership, it is the market leader, it
+is what the last project used. Those are shop habits, and a reviewer can tell.
+
+Write the decision into the analysis with the signal that produced it and what each rejected
+candidate failed. "No region in country, so residency cannot be met" is a reason. "Less
+suitable" is not. If no input settles it, say so, price the recommended one, and record the
+choice as an open question rather than pricing both and letting the reader decide.
+
+**A provider swap is not a rename.** Cost levers do not carry across: Graviton, Valkey and
+the AWS Infrequent Access log class have no Azure equivalent, and Azure's Ampere SKUs, its
+reservation instruments and its log tiers are different instruments. If the cloud changes
+after the sheet exists, the sizing is rebuilt, not relabelled.
+
+
 ## Find the money and the risk
 
 Two things drive both cost and credibility:

@@ -46,11 +46,24 @@ explanation bullets:
 
 Conventions:
 
-- **`intro_paragraph`** (mandatory) — 1–3 sentences that frame what the
-  diagram is showing and why the reader should care. Not a summary of
-  the bullets; a context-setter.
+- **`intro_paragraph`** (mandatory) — 1–3 sentences, **at most 70 words**, framing what the
+  diagram shows and why the reader should care. Not a summary of the bullets; a
+  context-setter. Measured on two deliveries, the intro is the second-largest source of
+  bloat after the words inside each bullet, and it is the easiest to cut because the figure
+  and its bullets carry the content.
 - **`explanation_bullets`** — between 7 and 17 entries per diagram
   (the prior-bid quality bar): fewer for simple diagrams, more for layered ones.
+  **Averaging at most 25 words each, and no single bullet past 40.** The count is not what
+  makes a figure section long; the words inside each bullet are. Twelve tight bullets beat six
+  loose ones at the same budget and let a reader name every component.
+
+  The AVERAGE is the measure, not the longest, and that is deliberate: measured across a
+  delivery the reader rates highly, the per-figure averages sit at 21 to 24 and cluster
+  tightly, while the longest bullet ranges from 26 to 51 and tells you nothing. A single long
+  bullet among eleven tight ones is fine; eleven bullets that are all a bit too long is what
+  reads as padding. (Note this is the OPPOSITE of the rule for prose sections, where one
+  over-long entry hiding among short ones is exactly what a reader stumbles on. Different
+  signal, different statistic. Do not copy one rule onto the other.)
   - **DO NOT prefix items with `"1. "`, `"(1) "`, `"Step 1 — "` or any other
     manual numbering.** `build_docx.py` prepends the `●` bullet glyph
     automatically — adding a number creates the duplicate `"●  1. text"`
@@ -68,6 +81,43 @@ Conventions:
   - Mention the specific architectural property the element provides
     (idempotency, durability, eventual consistency, circuit-breaker,
     etc.) — not just the product name.
+
+  **A component bullet carries FOUR things in one sentence.** This is what separates a
+  figure a reader trusts from a caption they skim. Not every bullet can carry all four, but
+  a figure whose bullets carry none of them is a labelled picture with a list beside it:
+
+  1. **The concrete product or service, named, in the bold label.** `**Customer app
+     (Flutter)**`, `**Managed PostgreSQL**`, `**MoMo / ZaloPay / VNPay + cards**`. A generic
+     label such as `**Database**` or `**The API layer**` wastes the one place a reader looks
+     for the technology decision. Where the platform is chosen, name the platform's service.
+  2. **What travels on the wire.** `HTTPS`, `WSS`, `gRPC`, `mTLS`, `webhook`, `OIDC`, `SOAP`,
+     `file exchange`, `AMQP`, `Kafka protocol`. An architecture diagram whose prose never
+     names a protocol has not described an integration.
+  3. **Synchronous or asynchronous**, in those words or their equivalent. This is the single
+     most useful fact about an edge and the one most often left out. "invoked synchronously
+     to charge and asynchronously via webhook for confirmation" tells a reviewer more than
+     three sentences of description.
+  4. **What happens when it fails, or the property that stops it failing.** "so a push
+     outage cannot block a transaction", "never trusted as a source of truth", "so a retried
+     payment cannot double-charge", "replaced behind an abstraction without touching the
+     domain". If an element cannot fail interestingly, give its ordering, durability or
+     isolation property instead.
+
+  **Naming the protocol and closing with the line convention are expected, not universal.**
+  Measured on the well-rated delivery, five of eight figures name a wire protocol and only two
+  restate the line convention: a decomposition view or a pipeline view legitimately names
+  neither. So the reviewer prompts for both rather than failing them. **Saying whether an
+  interaction is synchronous or asynchronous IS universal** — that delivery carries it on
+  every figure, and it is checked as a hard requirement.
+
+  Where the figure has a legend, the last bullet explains the line convention, so the reader can interpret the picture without scrolling back to the legend:
+
+  > `**Edge semantics**: solid edges are synchronous request and response; dashed edges are
+  > asynchronous events or fire-and-forget, a convention carried through every later figure.`
+
+  **Rejected bullets:** one that only restates its own label; one that describes what a
+  component *is* without saying what it *does for this design*; two bullets for one element;
+  a bullet naming a component that is not in the rendered figure.
   - Match the PL03 standard pattern used in the verbatim Section 3 of
     the template so the writing voice stays consistent across the doc.
 - No marketing language. Same Senior-SA voice as Problems & Solutions.
@@ -170,6 +220,7 @@ PNG, not by a check, so build the spec so they cannot happen:
    columns (a 6th column costs ~700 px of width and reads fine), or drop the edge: in `build_cloud`
    the COLUMN BOUNDARY is the cluster, so **one** edge into a column visually connects every node
    inside it and the rest are not "floating".
+   *This is about SAME-column edges only.* An edge spanning two or more columns is safe: see item 12.
 2. **`build_cloud`: aim the cross-column edge at a node near the source's own y.** The single node in
    a short column sits at the vertical centre, so an edge from it to the FIRST node of a 6-node
    column travels far vertically and clips the icons it passes. Target a node whose row is near the
@@ -225,6 +276,68 @@ PNG, not by a check, so build the spec so they cannot happen:
    throwaway path and prints the actual colliding rectangles from `build_cloud._LINT["boxes"]`. The
    renderer's own `label_overlap` message says only "an edge label overlaps a icon label" — it never
    names WHICH, so without the probe you are guessing at which of a dozen labels to shorten.
+   `_LINT["boxes"]` stores `(kind, bbox)` with no text, so to get the offending STRING, monkeypatch
+   `PIL.ImageDraw.ImageDraw.text` to log every drawn string with its measured box, render to a
+   throwaway path, then intersect. Note that `label_overlap` is frequently edge-label-versus-ICON,
+   not text-versus-text, so a text-only probe can come back empty on a spec that genuinely fails.
+
+11. **`build_cloud`: an adjacent-column edge label gets only HALF the gutter, so keep it under ~26
+   characters.** `_edge` routes a same-row adjacent edge as `[sp -> (mx, y) -> (mx, y) -> ep]`, which
+   makes the two horizontal runs equal length, and `_longest_mid` returns the midpoint of the FIRST
+   one. The label is therefore centred a **quarter** of the way across the gap, not half, so its left
+   edge runs back onto the source icon long before it reaches the target. The usable width is
+   `(COL_GAP + 2*COL_PAD + CELL_W - ICON) / 2`, about **318 px** at `S = 3`. Measure it statically
+   before rendering: build the edge font with `build_cloud._font(8 * build_cloud.S)` (`BC.FT` is only
+   populated inside `render()`), measure every adjacent-column edge label with `textlength`, and
+   shorten anything over ~300 px. Judging by the raw `COL_GAP` alone over-reports by roughly 2.5x, so
+   use the formula, and put the nuance in the explanation bullet rather than in the edge label.
+
+12. **`build_cloud`: an edge spanning two or more columns is SAFE, but it costs height.** `_plan_edges`
+   marks it as a `skip` and `_route_skip` sends it out through the source-side gutter, along a clear
+   bus lane BELOW the boxes, and back up the target-side gutter, staggering the channel per edge, so
+   it never crosses the icons of the columns it spans. Do not restructure a diagram to avoid one.
+   What it does cost is a bus lane each: four skip edges on a reuse map added a visible dead band
+   between the columns and the shared band and pushed the render from about 3in to 5.6in tall at the
+   6.5in embed. So budget skip edges against the HEIGHT cap in rule 4, and if a diagram needs many of
+   them, prefer routing from a single representative node per column (the column boundary is the
+   cluster, so one edge still reads as connecting everything inside it).
+   **But a LABELLED skip is not safe: the label does not follow the line into the clear bus lane.**
+   `_longest_mid` puts the label on the longest RUN of the route, and that is usually the vertical
+   riser up to the target row rather than the horizontal bus lane, so the label lands in a column
+   gutter and can sit on top of an icon. This is a real `label_overlap` blocker, not a cosmetic
+   risk (a 469 px skip label landed on a token-accounting icon). Either leave the skip unlabelled
+   and put the mechanism in the explanation bullet, or source it from the column's LAST node and
+   keep the label to two short words. Height is also legibility, not just page fit: re-authoring a
+   reuse map to ZERO skip edges took it from 5.6in to 4.8in at the 6.5in embed and lifted on-page
+   node text from 3.5 pt to 4.2 pt, so treat "how few skips can this diagram carry" as a design
+   question, not an afterthought.
+
+13. **`build_graph` in `TB`: the width is set by the SUM of the EDGE-LABEL widths in the busiest rank
+   gap, not only by the card count.** Every labelled edge becomes a virtual label node in an
+   intermediate rank, so ten labelled edges crossing one gap lay their labels out side by side and
+   that row, not the cards, becomes the widest thing in the graph. On a context diagram, shortening
+   five labels (`OpenID Connect` to `OIDC` on three edges, two connector labels to two words) took
+   16.82in to 15.14in of predicted width and lifted on-page text from 4.68 pt to 5.24 pt, with the
+   full term kept once on the federation edge and in the bullets. The counter-intuitive corollary:
+   **deleting edges can make the graph WIDER** (dropping three edges cost 2.5in, because `mincross`
+   reordered the ranks), so shorten labels and merge cards, do not thin the graph out. Card overhead
+   is fixed at roughly 1.45in each (node margin both sides, cell padding, `nodesep`), so about 5
+   cards per rank is the practical ceiling before gotcha 9 bites. Measure the prediction from the
+   spec BEFORE rendering; a re-authored context view came in at 4842 px wide against the previous
+   version's 5754 px, which is where the legibility gain actually came from.
+
+14. **A lint-clean `build_cloud` gutter can still read as ONE wrong line.** Two edges that terminate
+   at nearly the same y from opposite directions, in the same column gutter, draw what a reader sees
+   as a single continuous line joining the wrong two nodes (an image registry to a manifest repo, on
+   one run). `_lint_layout` cannot see it because nothing overlaps: the boxes are metres apart in
+   pixel terms and each line is individually correct. The same near-colinearity also produces
+   near-parallel double runs 16 px apart when row *n* of one column and row *n* of the next are
+   almost level. Both are found only by opening the PNG and looking at each gutter, and both are
+   fixed by reordering `nodes[]` inside one column or re-sourcing the edge from a different node, not
+   by shortening anything. So after the lint passes, budget one pass per figure that looks ONLY at
+   the gutters. Related, and worth knowing before you go hunting for a file that is not there:
+   `build_cloud` writes `<slug>.lint.json` **only when there are defects**, and deletes a stale one,
+   so a missing sidecar is the clean result, not a failed run.
 
 ### VERSIONED RE-RUN — reuse the CONTENT, never the RENDERER (MANDATORY)
 
@@ -249,6 +362,55 @@ analysis and that prose). Re-deriving the render is what lets a regenerate pick 
 renderers, the current DPI rules and the current SA-grade structure. If a re-render genuinely
 regresses against the previous version, say so in the Phase 6 report rather than silently
 reinstating the old images.
+
+**Reused prose AGES, because the reviewer gains checks between runs. Re-validate it before you
+assemble.** This is the second half of the seam rule and it is not optional. `format_reviewer.py`
+grows new checks out of exactly this self-learning loop, so prose that shipped clean from the
+previous version can be a DEFECT this run without a single word of it changing. It has already
+happened twice: the optional-section word ceilings and the `team_roles` table shape were both
+added by one run's Phase 6 and both broke the next run's reused content (seven sections over
+ceiling, one blocker). Before you reuse a value, run the current rules over it:
+
+- Count words for every capped prose section and every list ENTRY, in the generator, and fail
+  your own build on a breach rather than discovering it in the format review.
+- Re-check the required SHAPE of every value, not just its text: `team_roles` and every
+  `techstack_*` must be an array of `{name, description}` objects; a list of strings that used to
+  render as bullets is now a blocker.
+- `git diff` the skill since the previous version's date, or just read the newest
+  `LESSONS_LEARNED.md` entries, and treat anything the reviewer gained as a rule that applies to
+  the OLD prose too.
+- Diff `plan.json` against any `.bak_*` file beside it. A re-confirmed plan can silently retire a
+  whole recommendation, and the retired wording survives in the reused prose: one run had to
+  scrub a second-hyperscaler alternative out of two technology rows and an assumption entry after
+  the plan became single-cloud.
+
+Cutting an over-long section without losing substance follows the order in "How to cut without
+losing substance", with one addition that does the most work on a re-run: **de-duplicate across
+sections.** Two optional sections written months apart often state the same commitment twice (a
+monthly service report described in both Support Model and Service Level Targets), and deleting
+the second copy costs nothing.
+
+**Content reuse is not a byte copy: relabel every bullet against the NEW render.** This is the trap
+on the seam between the two halves. An `explanation_bullets` entry is `**<node name>**: <substance>`,
+and the node name came from the PREVIOUS version's diagram. Re-authoring the spec renames, merges and
+splits nodes ("UAE PASS" becomes "National digital identity", nine service groups become eight, a
+vendor product becomes a neutral capability), so replaying the old bullet list verbatim ships bullets
+naming boxes the reader cannot find, which is exactly the "one bullet per visible element" rule
+broken in the least visible way. Do it per diagram: keep each bullet's SUBSTANCE (it was accepted)
+and re-point its bold label at a node that exists in the new PNG, merging two bullets when you merged
+two nodes so the count stays inside 7 to 17. Do not lean on `diagram_check`'s `explanation_orphan` to
+find these: it is a warning, and it only fires when NO word of the bold label appears anywhere in the
+`.drawio`, so it misses a rename that keeps any word in common. Also re-check every FIGURE in the
+prose against the re-read inputs: a regenerate whose `plan.json` was re-confirmed can carry new
+effort, task or count figures, and those numbers appear in the bullets, the intro paragraphs and a
+boundary label as well as in `replacements.json`.
+
+**Keep scratch images out of `output/diagrams/`.** `diagram_check.py --dir` treats every PNG in the
+folder as a diagram, so a crop you saved while eyeballing a dense cluster is reported as an extra
+diagram with a missing `.drawio`. Write crops and probe output to a sibling `specs/` or `_scratch/`
+folder. And note what each renderer actually emits: `build_graph` writes PNG + SVG + `.drawio`,
+`build_cloud` writes PNG + `.drawio` (no SVG), `build_sequence` writes PNG only. Do not promise an
+SVG twin per figure in the Phase 6 report unless `build_graph` drew it.
 
 ### Fallback — mingrammer `diagrams` DSL (only if a diagram doesn't fit the primary renderers above)
 
@@ -385,6 +547,38 @@ COMMON = dict(
     edge_attr={"fontsize": "11"},
 )
 ```
+
+### NO LONG-SPAN EDGES — the "bent, ugly arrows" defect, and how to design it away
+
+A reader rejected a figure as having crooked, ugly arrows. The cause was not the renderer:
+five async edges each connected a node in one column to a node four or five columns away.
+The layout engine has nowhere to put those, so it drops them into routing lanes BELOW every
+boundary box, and each one travels down, across the full width of the page, and back up.
+Five of them stacked is a tangle of dashed lines under the diagram, and it reads as sloppy
+however crisp each individual line is.
+
+**Rules, in the order to apply them:**
+
+1. **An edge should span at most TWO columns.** Before drawing one that spans more, reorder
+   the columns so the two nodes are neighbours. Column order is free; edge length is not.
+2. **When many nodes talk to the SAME hub, draw a bus, not N long lines.** An event
+   backbone, a service mesh, an identity provider or a telemetry sink that every component
+   touches becomes ONE horizontal band with short stubs into it. That is also how a
+   principal architect would draw it on a whiteboard: five lines crossing the page say
+   "five relationships", one labelled band says "this is shared infrastructure", which is
+   the actual meaning.
+3. **A cross-cutting concern belongs in a band, not in edges.** Security, keys, policy and
+   telemetry touch everything. One band along the bottom with a single labelled connector
+   beats one edge per consumer.
+4. **If a relationship still needs a long edge after 1 to 3, delete the edge and put the
+   relationship in an explanation bullet.** A diagram is not obliged to draw every true
+   statement, and a line nobody can follow communicates less than a sentence.
+5. **Count before rendering.** If any edge spans more than two columns, or more than two
+   edges route below the boundary boxes, the layout is wrong and re-rendering will not fix
+   it. Change the composition.
+
+Keep `splines="ortho"`: right angles are correct. The defect is edge LENGTH and edge COUNT,
+which no spline setting can repair.
 
 ### SA-GRADE STRUCTURE — MANDATORY (this is what makes it look senior, not tool-generated)
 
@@ -763,9 +957,10 @@ include:
   "references": "... | null",
 
   // ---- RFP-driven optional sections (all default to null; see the block below) ----
+  // Every one of these has a HARD WORD CEILING. See "OPTIONAL SECTIONS ARE SHORT".
   "security_data_protection": "... | null",
   "team_structure": "... | null",
-  "team_roles": "... | null",
+  "team_roles":     [ {"name": "Role (<count>, <seniority>, <onshore|offshore>)", "description": "one sentence of accountability"}, ... ]  | null,
   "team_engagement_model": "... | null",
   "delivery_roadmap": "... | null",
   "delivery_milestones": "... | null",
@@ -844,6 +1039,14 @@ upstream partner exists.
 
 **Writing style** (from feedback memory):
 
+- **Separate paragraphs inside a prose value with ONE newline, never a blank line.**
+  `build_docx._expand_paragraph_with_value` does `value.split("\n")`, so a `\n\n` separator yields
+  an empty middle element and therefore an **empty `Normal` paragraph** in the document, carrying
+  the full space-before and space-after. That is the visible "chỗ thì trống nhiều chỗ thì gần"
+  uneven-whitespace defect the user has flagged, and it is invisible in the JSON. One run shipped
+  52 of them before anyone traced the cause. The paragraph's own space-after already supplies the
+  separation, so `"para one\npara two"` is what you want. On a re-run, normalise `\n{2,}` to `\n`
+  across every reused string value.
 - No RFP section-number references.
 - No phase plans / sprint plans.
 - No specific region names unless client stated one.
@@ -883,8 +1086,8 @@ the ones it asks for. Filling a section the client never requested is padding.
 | Key | Section | Fill it when the RFP asks for |
 |---|---|---|
 | `security_data_protection` | SECURITY & DATA PROTECTION | a security / data-protection approach as its own narrative (residency, encryption, access control, consent and data-subject rights, secure SDLC) |
-| `team_structure` | PROJECT TEAM › Team Structure | the shape of the delivery organisation: squads, how many, what each owns |
-| `team_roles` | › Roles & Responsibilities | the named ROLES and what each is accountable for |
+| `team_structure` | PROJECT TEAM › Team Structure | the shape of the delivery organisation: squads, how many, what each owns. Opens with the headcount arithmetic |
+| `team_roles` | › Roles & Responsibilities | the positions, **how many people in each**, seniority and location. An ARRAY rendered as a `Role \| Accountability` table |
 | `team_engagement_model` | › Engagement Model | onshore/offshore split, working hours overlap, how the client interacts with the team |
 | `delivery_roadmap` | DELIVERY PLAN & GOVERNANCE › Delivery Roadmap | a phased roadmap or a sequencing proposal |
 | `delivery_milestones` | › Milestones & Acceptance | milestones and what acceptance means at each |
@@ -896,13 +1099,277 @@ the ones it asks for. Filling a section the client never requested is padding.
 | `references` | CASE STUDY › References | client references |
 | `contractual_exceptions` | CONTRACTUAL EXCEPTIONS | exceptions to the client's contract terms |
 
-**Hard rule for the team section: describe roles, never invent people.** Give the role,
-what it is accountable for, its seniority band and its location. Do **not** invent a
-person's name, CV, years of experience, certification or photograph. Named personnel
-and CVs are supplied by the bid owner from real staff records, and the RFP usually
+### THE CLOUD CHOICE MUST BE JUSTIFIED IN THE DOCUMENT, IN THREE PLACES
+
+A bid names exactly ONE cloud, and it has to say why, where a reader will actually see it.
+A rationale that exists only in `plan.json` is invisible to the client, and a stack table
+that names a platform without a reason reads as a vendor habit rather than a decision.
+State it in all three of these, each time from the requirement rather than from preference:
+
+1. **The hosting row of the technology stack.** The `description` for the cloud and region
+   row must name the requirement that forced the choice, the property of this platform that
+   satisfies it, and what was rejected. Two or three sentences.
+2. **One sentence in the Executive Summary.** An evaluator who reads nothing else must
+   still learn which platform and why.
+3. **The assumptions register**, stating whether this is a recommendation or a client
+   instruction, and what would change if the client has already chosen.
+
+Justify on requirements, never on familiarity. Acceptable reasons are the ones a client can
+check: a mandatory residency or sovereignty clause and how the platform satisfies it; the
+number of in-country regions and therefore whether recovery can stay inside the border;
+whether the required managed services and model inference exist in that region at all;
+certification or accreditation the requirements name. **Unacceptable: our team knows it,
+we have a partnership, it is the market leader, it is what we usually use.**
+
+If a candidate is rejected, say what it failed rather than that it lost. "No region in
+country, so the residency clause cannot be met at all" is a reason; "less suitable" is not.
+
+**Never present a second cloud as an equal alternative.** If a genuine fallback matters to
+the client, say what would trigger reconsidering, not that two options are equally good.
+Naming two clouds costs the reader confidence and, when the cost model prices only one,
+produces a bid that quotes something other than what it recommends.
+
+### THE WHOLE DOCUMENT HAS A LENGTH BUDGET — and the figures are where it is lost
+
+A technical proposal is read by people deciding whether to shortlist you. A document
+nobody finishes cannot win, so total length is a quality attribute, not a side effect.
+
+**Budget: 8,000 words of body text.** Measured on the delivered `.docx`. A bid that needs
+more must earn it, section by section, in the Phase 6 report.
+
+**Where it actually goes wrong, measured on a real 14,285-word delivery:**
+
+| Block | Words | Share | Verdict |
+|---|---:|---:|---|
+| Ten figure sections, 19 paragraphs each | 5,662 | **40%** | **the whole problem** |
+| Risks, assumptions, contractual exceptions | 1,741 | 12% | keep, this is requirement coverage |
+| Technology stack tables | 1,837 | 13% | keep, this is the technical depth |
+| Template-verbatim management block | 1,404 | 10% | template, not ours to cut |
+| Problems and solutions, team, optional | 1,900 | 13% | already capped |
+
+**So the rule that matters is NOT the bullet COUNT. It is the words per bullet and the
+length of the intro.** A measured comparison against a delivered proposal the reader rates
+highly settles this:
+
+| | the well-rated delivery | the over-long one | what actually differs |
+|---|---:|---:|---|
+| figures | 8 | 10 | +2 |
+| bullets per figure | 12.6 | 17 | +4 |
+| **words per bullet** | **22** | **28** | **+6, and this is the bloat** |
+| **intro paragraph** | **56 w** | **78 w** | **+22, and so is this** |
+| per figure | 336 w | 554 w | |
+
+Cutting the COUNT was tried and it was the wrong lever: at six bullets a reader can no
+longer name the components, and the requirement that the figure be re-drawable from the
+bullets alone is lost. **Keep 7 to 17 bullets. Cut the words inside each one, and cut the
+intro.** Twelve tight bullets beat six loose ones at the same word budget and say far more.
+
+
+Cutting length must never cut requirement coverage. If a real requirement can only be
+answered at length, answer it and say in the Phase 6 report which budget it broke and why.
+
+### BULLETS, NOT PARAGRAPHS — the fix for "it still reads long"
+
+A section can sit inside its word ceiling and still read as a wall of text. That happened:
+sections at 107, 129 and 160 words, with sentences averaging 17 to 23 words, were still
+rejected as rambling. **Length was never the problem. The absence of a visual entry point
+was.** A reader skimming a bid needs somewhere for the eye to land on every section.
+
+So these sections are **ARRAYS of labelled bullets, not prose strings**:
+
+| Key | Bullets | Words per bullet |
+|---|---:|---:|
+| `executive_summary` | 1 lead line + 5 to 6 | 30 |
+| `security_data_protection` | 5 to 7 | 30 |
+| `team_structure` | 4 to 5 | 26 |
+| `team_engagement_model` | 3 to 4 | 26 |
+| `delivery_roadmap` | 4 to 6 | 28 |
+| `delivery_milestones` | 4 to 6 | 28 |
+| `delivery_governance` | 4 to 5 | 26 |
+| `support_model` | 4 to 6 | 28 |
+| `summary_body` | 4 to 5 | 28 |
+
+**Every bullet is `**Label**: one sentence.`** The label is 1 to 4 words naming the thing
+decided, and it carries the meaning on its own so a reader who reads only the labels still
+learns the answer. `**Residency**: enforced by subscription policy that blocks
+provisioning outside the region` works. `**Overview**: this section describes our
+approach` is padding and gets deleted.
+
+`executive_summary` is the ONE exception to bullets-only: element 1 is a single plain
+sentence stating what the client is buying, then the rest are labelled bullets.
+
+**`purpose` and `mobile_app_strategy` stay prose**, at 2 to 3 sentences each. A three
+sentence section does not need bullets.
+
+Rejected constructions, in any of these: a sentence that only announces the section's
+topic; a bullet that continues the previous bullet's sentence; two bullets with the same
+label; a label longer than four words; a bullet with two sentences where the second only
+restates the first.
+
+### THE CLOUD DECISION GOES NEAR THE TOP, AS ITS OWN BULLET
+
+"Why this platform" must be a **labelled bullet inside `executive_summary`**, in the first
+three bullets, not a sentence buried in a paragraph. It was buried once: the rationale was
+present in paragraph three of five and a reader reported it missing, which for a bid means
+it WAS missing. One bullet, the requirement first and the platform second:
+
+`**Cloud**: residency is mandatory and only this platform has two regions in country, so
+recovery and model inference never leave it`
+
+The fuller argument still belongs in the hosting row of the technology stack and in the
+assumptions register, as set out above. This bullet exists so nobody has to find it.
+
+### WRITE TIGHT — the whole document, with the technical content protected
+
+A bid is read by people deciding whether you understand their problem. Length does not
+demonstrate understanding; precision does. Two ceilings apply to the narrative sections,
+and a **protected list** says exactly what must NOT be compressed, because cutting
+technical substance to hit a word count is the failure this rule exists to prevent.
+
+**Narrative ceilings (hard):**
+
+| Key | Ceiling | Note |
+|---|---:|---|
+| `problems_and_solutions` | **55 words per pair** | The prompt already said "two sentences" per bullet. Measured, the last run averaged 143 words, so the rule existed and was ignored. 55 words is two real sentences |
+| `executive_summary` | 260 | An evaluator reads this and decides whether to keep reading |
+| `summary_body` | 200 | It restates; it does not re-argue |
+| `purpose` | 150 | Why this engagement exists, not what is in it |
+| `mobile_app_strategy` | 160 | The decision and its consequence, nothing else |
+| `system_overview_intro` | 300 | Technical, so generous, but still bounded |
+| diagram `explanation_bullets` | 30 words per bullet | Keep EVERY bullet; shorten each one |
+
+**Count the words the way the REVIEWER counts them, or you will pass your own check and fail its.**
+`format_reviewer` splits on whitespace (`str.split()`) over the text as RENDERED, which differs from
+the JSON you authored in three ways that have each cost a run:
+
+1. **A ceiling stated per logical entry can render as more than one paragraph.**
+   `build_docx._stringify_value` turns each `problems_and_solutions` pair into TWO paragraphs,
+   `● <problem>` and `**Solution:** <solution>`, and `check_narrative_length` measures the LONGEST
+   paragraph under the heading. So the reviewer's ceiling is effectively per half while the rule here
+   is per PAIR, and the two readings differ by about 2x. Satisfy the strict one: **the pair, both
+   halves added together, at most 55 words**, with neither half over about 30. Ten pairs written that
+   way came in at 46 to 50 words each and kept the quantified pain and the acceptance criterion in
+   every one.
+2. **The rendered prefixes are words.** `●` and `Solution:` each count, as does the `● ` the renderer
+   prepends to every entry of a list-valued section. Author to about 50 for a 55 ceiling and about 48
+   for a 50, rather than measuring to the last word and losing on the glyph.
+3. **Nothing enforces the 30-word bullet ceiling, so your own gate has to.** No check in
+   `format_reviewer.py` or `diagram_check.py` measures `explanation_bullets`. On one run all four
+   diagram agents self-reported "max 30 words" while seven bullets were actually 31 or 32, because
+   each had counted with its own rule. Do the counting in the step that MERGES the per-diagram blocks
+   into `diagrams.json`, with `len(s.split())`, and refuse to write the file on a breach. Never take
+   an agent's self-reported count as the measurement.
+
+**PROTECTED — never compress these to save words:**
+- **`techstack_*` table rows.** One row per real technology with its advantage in one or
+  two sentences. This is where technical depth is demonstrated, and the table format
+  already makes it scannable. Do not merge rows, do not drop rows, do not shorten a
+  description to a fragment that no longer says why the choice was made.
+- **`system_overview_intro` and every diagram's `intro_paragraph` and
+  `explanation_bullets`.** The figures plus their explanation are the architecture
+  argument. Shorten individual sentences, never remove a component's bullet.
+- **The technical substance of `security_data_protection`.** The residency mechanism, the
+  encryption and key-custody model, the access model and the secure development lifecycle
+  each have to remain identifiable. Cut the sentences that restate the requirement, not
+  the ones that state the control.
+- **`risk_register`, `assumptions_dependencies`, `service_levels`,
+  `contractual_exceptions`.** These are per-entry capped at 50 words and the LIST may be
+  as long as the requirements demand. Never drop an entry to shorten a section.
+
+**Sentence discipline, applied everywhere including the protected sections:**
+1. One idea per sentence. Average under 25 words. A sentence over 40 words is two
+   sentences that have not been separated yet.
+2. Lead with the decision, then the reason. "The estate runs in one region, because
+   residency is mandatory" beats "Because residency is mandatory, and after considering
+   the alternatives, we propose that the estate should run in one region".
+3. Delete every sentence that restates the requirement before answering it. The client
+   wrote the requirement.
+4. Delete adjectives that carry no decision: robust, comprehensive, world-class, seamless,
+   best-practice, cutting-edge, holistic, leverage, synergy.
+5. Prefer the concrete noun over the description of it. "Subscription-level policy that
+   blocks out-of-region provisioning" beats "a mechanism that prevents resources from
+   being created outside the approved region".
+6. No sentence whose only content is that a later section exists.
+
+**Never pad to reach a ceiling.** A section at half its ceiling that answers the question
+is better than one at the ceiling that also answers it.
+
+### OPTIONAL SECTIONS ARE SHORT — hard word ceilings
+
+A bid reader skims these sections looking for a number, a name or a commitment. Long
+prose hides all three. Every optional section has a **hard word ceiling**, and going
+over it is a defect the reviewer rejects (`optional_section_too_long`), not a style
+preference. Answer the question, state the commitment, stop.
+
+| Key | Ceiling | What earns the words |
+|---|---:|---|
+| `security_data_protection` | 260 | the residency mechanism, encryption and key custody, access model, data-subject rights, secure SDLC. One short paragraph each, no restating the requirement back |
+| `team_structure` | 150 | the squad shape and the headcount arithmetic (see below) |
+| `team_roles` | table | an array, one row per position, no prose |
+| `team_engagement_model` | 110 | onshore/offshore split, hours overlap, how the client interacts |
+| `delivery_roadmap` | 180 | the sequence and what gates each transition |
+| `delivery_milestones` | 160 | the milestone set and what acceptance means |
+| `delivery_governance` | 130 | forums, cadence, escalation, change control |
+| `support_model` | 160 | coverage, tiers, tooling, reporting |
+
+List-valued sections (`service_levels`, `assumptions_dependencies`, `risk_register`,
+`contractual_exceptions`, `references`) are capped per ENTRY at **50 words**, not in
+total, so the list can be as long as the RFP requires while each line stays scannable.
+(Fifty, not forty-five: at forty-five the gate fired on entries one word over, and a
+check that cries wolf gets ignored, which is worse than not having it.)
+
+**How to cut without losing substance**, in the order to try:
+1. Delete every sentence that restates the requirement before answering it. The client
+   wrote the requirement; they do not need it read back.
+2. Delete adjectives that carry no decision. "robust", "comprehensive", "world-class",
+   "seamless", "best-practice" never survive.
+3. Replace a sentence of explanation with the concrete noun. "a mechanism that prevents
+   resources being created outside the approved region" becomes "subscription-level
+   policy that blocks out-of-region provisioning".
+4. Merge two sentences that share a subject.
+5. Only then drop content, and if you drop something the RFP asked for, say so in the
+   Phase 6 caveats.
+
+**Never pad to reach a ceiling.** A 90-word section that answers the question is better
+than a 180-word one that also answers it.
+
+### Team section: name the positions and the headcount
+
+**`team_roles` MUST be a JSON array of `{"name", "description"}` objects**, which
+`build_docx.py` renders as a `Role | Accountability` table (same borders and shaded
+header as the technology tables, wider first column). A prose string here is a format
+defect. The `name` field carries the **position, the number of people, the seniority and
+the location** in this exact shape:
+
+```
+"Backend Engineer (6, 2 senior + 4 mid, offshore)"
+"Solution Architect (1, principal, offshore)"
+"Engagement Lead (1, director, onshore)"
+```
+
+`description` is **one sentence** of what that role is accountable for. One row per
+position, not per person.
+
+**`team_structure` opens with the headcount arithmetic, in numbers.** State the peak
+and average team size and show how it follows from the estimate, so the number is
+defensible instead of asserted:
+
+> total estimated effort ÷ proposed delivery months ÷ productive hours per person-month
+> (use 130 productive hours, which allows for leave, ceremonies and context switching)
+> = average concurrent engineers, then state the peak and when it occurs.
+
+If an effort estimate is available in the inputs (a work breakdown, an hours total),
+you MUST derive the headcount from it and say which figure you used. If none is
+available, say the team shape is sized at kickoff against the agreed estimate and give
+the squad structure without inventing a number.
+
+**Hard rule: describe positions, never invent people.** Headcount, seniority band and
+location are a staffing proposal and belong here. A person's **name, CV, years of
+experience, certification or photograph** is a fact about a real human and must never be
+invented. Named personnel come from the bid owner's staff records, and the RFP usually
 wants them as an annex rather than in the technical narrative. If the RFP demands named
-CVs, write the role structure here and flag in the Phase 6 caveats that the named CVs
-and the onshore/offshore headcount must be attached before sending.
+CVs, give the position table here and flag in the Phase 6 caveats that the named CVs
+must be attached before sending.
 
 The same restraint applies to `references` (never invent a client name or a contact) and
 to `contractual_exceptions` (a legal position is the bid owner's to state, not yours: if
@@ -932,3 +1399,14 @@ calendar is set at kickoff.
 
 If any agent fails, surface the error and ask the user whether to retry the
 failed agent, skip it, or abort the whole run.
+
+## Before the long build: check the stack against the architecture
+
+```
+python scripts/check_consistency.py --plan spec/plan.json
+```
+
+A cloud mismatch between the stack and the figures costs a whole regeneration if it
+is found afterwards, and this finds it in a second. Run it once the plan is settled
+and again with `--diagrams` as soon as the figure specs exist, rather than waiting
+for the format review.

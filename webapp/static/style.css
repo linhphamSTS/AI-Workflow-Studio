@@ -440,3 +440,30 @@ details.spec-edit[open] summary .icon{transform:rotate(90deg)}
   #ws-view{padding:24px 20px 50px}
   .snode{width:auto;flex:1}.snode .lbl{display:none}
 }
+
+/* WBS + Cost estimate type. Amber, so the three types are told apart at a glance in the
+   sidebar without reading the label. */
+.tbadge.wbs{background:rgba(245,166,35,.18);color:#f5a623}
+
+/* A caution that is not an error: a plan that will still generate, but that a reader should
+   look at first. Used for a factor stack with no upward factor, which is the shape of a
+   known under-count, and for a cloud that is not yet settled. */
+.warnbox{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;margin:10px 0;
+  border:1px solid rgba(245,166,35,.45);border-radius:var(--r);
+  background:rgba(245,166,35,.10);color:var(--ink-2);font-size:13px;line-height:1.55}
+.warnbox svg{flex:0 0 auto;color:#f5a623;margin-top:1px}
+
+/* Direction chip on a factor row: whether it pushes the estimate up or down. The upward
+   ones are the ones that get forgotten, so they are the ones that carry the warm colour. */
+.fdir{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:700;
+  letter-spacing:.02em;white-space:nowrap}
+.fdir.up{background:rgba(245,166,35,.18);color:#f5a623}
+.fdir.down{background:rgba(76,141,255,.16);color:#4c8dff}
+
+.plainlist{margin:0;padding-left:20px;font-size:13px;line-height:1.6;color:var(--ink-2)}
+.plainlist li{margin:3px 0}
+
+/* The estimate sub-choice. Separated from the type row so it reads as a second question
+   rather than three peers, because it only exists once WBS is chosen. */
+.wtype-sub{border-top:1px solid var(--line,#2a2a35);margin-top:6px;padding-top:2px}
+.wtype-sub .wt-d{font-size:12px;line-height:1.45}

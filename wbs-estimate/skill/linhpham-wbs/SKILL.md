@@ -60,7 +60,7 @@ makes the comparison impossible and reads as carelessness.
 2 Analyze   scope, modules, frontend targets, heavy and risky areas
 3 Confirm   GATE: structure, columns, factor stack, what is zeroed
 4 Estimate  every leaf task, then the explicit factor layer
-5 Build     the workbook
+5 Build     the workbook  (one command: scripts/build_all.py -> both workbooks + both gates)
 6 Verify    the verifier must pass before anything is shown as done
 7 Report    summary, ratios, caveats, and the self-learning entry
 ```

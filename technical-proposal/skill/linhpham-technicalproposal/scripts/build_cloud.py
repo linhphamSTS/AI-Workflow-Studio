@@ -237,7 +237,88 @@ def _place_col(d, col, x, top, content_h):
         n["_x"] = cxc; n["_y"] = cy + ICON / 2
         cy += h + ROW_GAP
 
+
+def straighten_columns(spec: dict) -> str:
+    """Reorder columns so arrows run short and forward. Returns a one-line report.
+
+    A reader rejected a figure for "crooked, ugly arrows". Cropping the render showed the
+    cause was not the renderer: several edges joined nodes four or five columns apart and one
+    ran BACKWARD, from a later column to an earlier one. The layout has nowhere to route
+    those, so each is pushed into a lane BELOW every boundary box, travelling down, across
+    the full page width and back up. Five of them stacked is a tangle, however crisp each
+    individual line is. Orthogonal routing was already correct; the defect is edge LENGTH
+    and DIRECTION, and no spline setting repairs that.
+
+    Column ORDER is free and edge length is not, so this is applied automatically at render
+    time rather than left to whoever writes the spec. Ranked by (backward edges, worst span,
+    total span): a reverse edge is what creates the loop, so it outranks everything. Column 0
+    stays pinned because it is the reading entry point, and a figure that reads outwards from
+    the middle is worse than one long edge.
+
+    Every permutation is evaluated when the column count allows, so the outcome is
+    deterministic rather than dependent on a search order.
+    """
+    import itertools
+
+    cols = spec.get("columns") or []
+    edges = spec.get("edges") or []
+    if not (3 <= len(cols) <= 8) or not edges:
+        return ""
+    # A wrap (a VNet or region box) names its columns by id and must stay CONTIGUOUS, so a
+    # permutation is only legal when every wrap's columns still form one unbroken block.
+    # Refusing to reorder whenever a wrap exists, which was the first attempt, disqualified
+    # exactly the figures that needed it most: the reference architecture is nothing but a
+    # VNet wrap.
+    wrap_sets = []
+    for wrap in (spec.get("wraps") or []):
+        ids = set(wrap.get("cols") or [])
+        idxs = {i for i, c in enumerate(cols) if c.get("id") in ids}
+        if idxs:
+            wrap_sets.append(idxs)
+
+    def wraps_intact(order):
+        for want in wrap_sets:
+            at = sorted(pos for pos, orig in enumerate(order) if orig in want)
+            if at and at[-1] - at[0] + 1 != len(at):
+                return False
+        return True
+
+    where = {n["id"]: i for i, c in enumerate(cols) for n in c.get("nodes", [])}
+
+    def rank(order):
+        pos = {orig: new for new, orig in enumerate(order)}
+        back = worst = total = 0
+        for e in edges:
+            a, b = where.get(e.get("from")), where.get(e.get("to"))
+            if a is None or b is None:
+                continue
+            d = pos[b] - pos[a]
+            if d < 0:
+                back += 1
+            total += abs(d)
+            worst = max(worst, abs(d))
+        return (back, worst, total)
+
+    identity = list(range(len(cols)))
+    legal = [o for o in ([0] + list(p) for p in itertools.permutations(identity[1:]))
+             if wraps_intact(o)]
+    if not legal:
+        return "columns not reordered: no ordering keeps every wrap contiguous"
+    best = min(legal, key=rank)
+    before, after = rank(identity), rank(best)
+    if best == identity or after >= before:
+        return "columns already optimal: %d backward, worst span %d" % before[:2]
+    spec["columns"] = [cols[i] for i in best]
+    return ("columns reordered to straighten arrows: backward %d->%d, worst span %d->%d, "
+            "total %d->%d" % (before[0], after[0], before[1], after[1], before[2], after[2]))
+
+
 def render(spec: dict, out: Path):
+    # Straighten the arrows before anything is measured: column order decides edge length,
+    # and a long or backward edge is what gets pushed into a routing lane under the boxes.
+    msg = straighten_columns(spec)
+    if msg:
+        print("  " + msg)
     _init_fonts()
     _lint_reset()
     d0 = ImageDraw.Draw(Image.new("RGB", (8, 8)))

@@ -14,6 +14,8 @@
       "lines": [{"layer": "Compute", "service": "EKS worker nodes",
                  "config": "why it is this size",
                  "price_key": "m7g.large", "hourly": true,
+                 "reservable": true,      // vendor sells reserved/committed pricing for it
+                 "stoppable": true,       // it has a stopped state, so a schedule works
                  "qty": {"prod": 4, "stg": 2, "dev": 3}}],
       "already_applied": [{"name": "...", "why": "..."}],
       "levers": [{"name": "...", "what": "...", "scope": "non-prod hourly",
@@ -78,7 +80,13 @@ def build_env(ws, spec, env):
     hdr = r
     r += 1
 
-    layers, keys, run = {}, {}, []
+    # `run` is every hourly row. The two narrower lists exist because a lever is only
+    # honest over the rows the vendor actually sells it for: a control plane, a load
+    # balancer and a NAT gateway cannot be reserved, and a managed cache, search or
+    # streaming tier has no stopped state, so a nightly schedule buys nothing there.
+    # Reservability and stoppability are INDEPENDENT facts, not one derived from the
+    # other: a managed database can usually be stopped on a tier that cannot be reserved.
+    layers, keys, run, reservable, stoppable = {}, {}, [], [], []
     n = 0
     for line in spec['lines']:
         qty = (line.get('qty') or {}).get(env['key'], 0)
@@ -100,6 +108,10 @@ def build_env(ws, spec, env):
         keys.setdefault(line['price_key'], []).append(r)
         if line.get('hourly'):
             run.append(r)
+            if line.get('reservable', True):
+                reservable.append(r)
+            if line.get('stoppable', True):
+                stoppable.append(r)
         r += 1
 
     r += 1
@@ -131,7 +143,8 @@ def build_env(ws, spec, env):
 
     autofit_row_heights(ws, ENV_W, skip_rows={1, hdr})
     ws.row_dimensions[hdr].height = 40
-    return {'sheet': ws.title, 'total_row': r, 'run': run, 'keys': keys,
+    return {'sheet': ws.title, 'total_row': r, 'run': run,
+            'reservable': reservable, 'stoppable': stoppable, 'keys': keys,
             'key': env['key'], 'name': env['name']}
 
 
@@ -143,8 +156,17 @@ def build_optimisation(ws, spec, envs):
     prod, nonprod = envs[0], envs[1:]
 
     def basis(scope):
+        # A scope naming an instrument resolves to the rows eligible for it, not to every
+        # hourly row. Claiming a lever over an ineligible line is the defect this exists to
+        # prevent, and it is invisible in the finished workbook.
         if scope == 'non-prod hourly':
             t = [f"'{e['sheet']}'!I{x}" for e in nonprod for x in e['run']]
+        elif scope == 'non-prod stoppable':
+            t = [f"'{e['sheet']}'!I{x}" for e in nonprod for x in e['stoppable']]
+        elif scope == 'prod reservable':
+            t = [f"'{prod['sheet']}'!I{x}" for x in prod['reservable']]
+        elif scope == 'all reservable':
+            t = [f"'{e['sheet']}'!I{x}" for e in envs for x in e['reservable']]
         elif scope == 'prod hourly':
             t = [f"'{prod['sheet']}'!I{x}" for x in prod['run']]
         elif scope in ('none', '', None):
@@ -205,7 +227,7 @@ def build_optimisation(ws, spec, envs):
         r += 1
         for i, ri in enumerate(spec['reserved'], start=1):
             for col, v in enumerate([i, ri['term'], ri['option'], ri['pct'],
-                                     basis('prod hourly'), None, None, None,
+                                     basis('prod reservable'), None, None, None,
                                      ri.get('note', '')], start=1):
                 style(ws.cell(r, col, v), rgb=C_LEAF,
                       align=A_LEFT_TOP if col == 9 else A_CENTER)
@@ -333,7 +355,11 @@ def build_cover(ws, spec, envs):
     style(ws.cell(r, 1), rgb=C_TOTAL, bold=True, align=A_LEFT_CENTER)
     for col in (2, 3):
         L = get_column_letter(col)
-        ws.cell(r, col, '=SUM(%s%d:%s%d)' % (L, first, L, r - 1))
+        # Name each environment row rather than sum the range. The range happens to hold only
+        # environment rows today, so it is arithmetically right, but it is the same fragile
+        # shape that tripled a delivered WBS cover the moment a reader inserted a subtotal
+        # inside it. Named cells cannot be widened by accident.
+        ws.cell(r, col, '=' + '+'.join('%s%d' % (L, x) for x in range(first, r)))
         style(ws.cell(r, col), rgb=C_TOTAL, bold=True)
         ws.cell(r, col).number_format = MONEY
     ws.merge_cells(start_row=r, start_column=5, end_row=r, end_column=span)

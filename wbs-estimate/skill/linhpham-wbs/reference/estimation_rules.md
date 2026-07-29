@@ -75,6 +75,38 @@ wins and then loses money.
 
 ## 3. Effort reference by task type
 
+### Which column a task lands in
+
+The tables below give BE and FE because those two carry most work. A workbook usually has
+more columns than that, and putting hours in the wrong one distorts every ratio afterwards.
+
+| Task shape | Column(s) |
+|---|---|
+| Landing zone, network, cluster, pipeline, environments, observability | **Devops** (or BE when the workbook has no Devops column) |
+| A shared engine several products call: identity, payments, ledger, notification, connector | **BE** only. The consuming screens are estimated separately |
+| A screen in a mobile app | **Mobile**, plus light BE for any endpoint that exists only for it |
+| A screen in a web portal or admin console | **FE** + **BE**. Each management screen needs list, detail, action and export APIs |
+| Cross-platform mobile (Flutter, React Native) | **one Mobile column for both iOS and Android**, not two |
+| Native mobile | one column per platform, and **Mobile ≈ 1.2-1.5× the FE web** for the same feature: camera and permissions, GPS, push in foreground and background, deep links, biometrics, secure storage, offline handling, store submission, real-device testing |
+| Design system, component library, bilingual and right-to-left layout, accessibility | **UI/UX** if the workbook prices it, otherwise absorbed into FE and Mobile |
+
+### The AI column is narrower than it looks
+
+Put hours in **AI** only for work whose output is a model's: vision, OCR and document
+extraction, embeddings and retrieval, ranking or matching learned from data, generation,
+guardrails and evaluation sets.
+
+Everything a reader might call "smart" but which is in fact **rule-based belongs in BE**:
+dispatch and assignment, surge or dynamic pricing, ETA from historical averages, scoring
+from a written rule set, a heatmap over aggregates. Calling one of these AI overstates the
+AI column and understates BE, and it also promises the client a capability the build does
+not contain.
+
+**Read the out-of-scope list before allocating anything to AI.** When the engagement defers
+the model work, the AI column is legitimately zero even on a product that talks about AI
+throughout, and the in-scope rule-based version of each feature belongs in BE.
+
+
 Hours are for one task, already assuming a competent team and normal complexity. Move
 within the range on evidence from the documents, not on feel.
 
@@ -176,6 +208,8 @@ Under-estimated more often than anything else. A defect here is a financial defe
 | Multi-tenant, shared DB, row isolation | 4-6 | 0 |
 | Multi-tenant, database per tenant | 8-12 | 0 |
 | Tenant provisioning | 6-10 | 3-5 |
+| Tenant administration screens | 5-8 | 5-8 |
+| Tenant switching or support impersonation | 3-5 | 2-3 |
 
 ### Non-functional
 
@@ -237,6 +271,12 @@ Blended: heavy use ×0.7, moderate ×0.8, light ×0.85.
 
 What the factor does **not** reduce: review time, UAT support, or the effort to test
 generated code, which needs more scrutiny at the edges rather than less.
+
+Two more limits on it. **The factor multiplies a base estimate; it does not replace
+one.** Estimate the work first from section 3, then apply it, or the number has no
+footing. And **a junior with these tools is not a senior**: the tools raise output on
+work whose shape is already known, and they do not supply the architectural judgement
+that decides what shape it should be, so the factor never justifies a thinner team.
 
 ### Both directions, or neither
 

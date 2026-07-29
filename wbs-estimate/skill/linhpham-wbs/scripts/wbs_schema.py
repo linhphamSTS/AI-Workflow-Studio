@@ -18,6 +18,20 @@ workbook rather than a differently-worded one.
       "zero_modules":  ["6"],         // same, by leading module number
       "zero_note":     "why they are zero, shown on the cover",
       "competitive":   1.0,           // 1.0 = no discount taken in the hours
+      "bid_situation": "many vendors bidding",   // from rules section 1, decides the
+                                                 // factor the table suggests
+      "ai_factor": {                  // REQUIRED: where the AI discount lives, so it
+        "where":   "in_base",         // cannot be taken a second time by a later run
+        "blended": 0.79,              // effective factor already inside the numbers
+        "note":    "IaC x0.5, CRUD x0.65, business logic x0.9"},
+      "phase1": {                     // the cheaper option a contested bid needs. A
+                                      // SUBSET of the same ids, never a second WBS, so
+                                      // both options are one set of numbers
+        "name":    "Phase 1 - core platform and first product",
+        "include": ["1", "2", "3"],   // module numbers or dotted prefixes
+        "note":    "what the client gives up, in one line"},
+      "reuse": {                      // what is quoted once instead of per product
+        "shared_sheets": ["Shared Platform"], "consumers": 3},
 
       "sheets": [                     // one per commercial line item
         {"name": "Shared Platform", "modules": [1, 2]},
@@ -183,6 +197,36 @@ def validate(spec):
     for c in spec.get('zero_columns', []):
         if c not in cols:
             e.append(f'zero_columns: unknown column {c!r}')
+
+    # The AI discount has to say where it lives. It is normally folded into the base
+    # numbers while they are written, which is fine, but then nothing in the workbook
+    # shows it was taken and a later reader asking 'the developers use AI, cut it' gets
+    # the same discount twice. On a fixed-price bid that is a loss, not a keener price.
+    ai = spec.get('ai_factor')
+    if not isinstance(ai, dict):
+        e.append("missing ai_factor: declare {'where': 'in_base'|'in_factors'|'none', "
+                 "'blended': <float>, 'note': '<per-task-type split>'} so the discount "
+                 'is auditable and cannot be applied twice')
+    else:
+        if ai.get('where') not in ('in_base', 'in_factors', 'none'):
+            e.append("ai_factor.where must be 'in_base', 'in_factors' or 'none'")
+        b = ai.get('blended')
+        if ai.get('where') != 'none' and not (_num(b) and 0.3 <= b <= 1.0):
+            e.append('ai_factor.blended must be the effective factor already applied, '
+                     'between 0.3 and 1.0')
+
+    p1 = spec.get('phase1')
+    if isinstance(p1, dict):
+        if not p1.get('include'):
+            e.append('phase1.include is empty: name the modules or id prefixes the '
+                     'cheaper option contains')
+        if not str(p1.get('note') or '').strip():
+            e.append('phase1.note is required: an option a client cannot see the cost '
+                     'of is a trap, so state what they give up')
+
+    if not str(spec.get('bid_situation') or '').strip():
+        e.append('missing bid_situation: name the bid situation from rules section 1 so '
+                 'the competitive factor is a decision rather than an omission')
 
     if e:
         raise SpecError('\n'.join(' ! ' + x for x in e))

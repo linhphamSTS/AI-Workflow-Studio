@@ -165,17 +165,17 @@ def _stringify_value(val):
                 # AI-generated; colon is the preferred separator.
                 prob = re.sub(r'(\*\*[^*]+\*\*)\s*—\s*', r'\1: ', it['problem'], count=1)
                 sol  = re.sub(r'(\*\*[^*]+\*\*)\s*—\s*', r'\1: ', it['solution'], count=1)
-                chunks.append(f"● {prob}")
+                chunks.append(f"●	{prob}")
                 chunks.append(f"**Solution:** {sol}")
             return "\n".join(chunks)
         lines = []
         for it in val:
             if isinstance(it, str):
-                lines.append(f"● {it}")
+                lines.append(f"●	{it}")
             elif isinstance(it, dict):
-                lines.append("● " + "; ".join(f"**{k}:** {v}" for k, v in it.items()))
+                lines.append("●	" + "; ".join(f"**{k}:** {v}" for k, v in it.items()))
             else:
-                lines.append(f"● {it}")
+                lines.append(f"●	{it}")
         return "\n".join(lines)
     if isinstance(val, dict):
         return "\n".join(f"**{k}:** {v}" for k, v in val.items())
@@ -515,7 +515,7 @@ def _build_bullet_paragraph(text: str, *, is_first: bool = False):
     p.append(pPr)
     # Single space between bullet glyph and text (was 2) — user flagged
     # the gap as "bullet vs chữ xa nhau".
-    body_text = "● " + _strip_manual_numbering(text)
+    body_text = "●	" + _strip_manual_numbering(text)
     r = OxmlElement("w:r")
     t = OxmlElement("w:t")
     t.set(qn("xml:space"), "preserve")
@@ -1197,11 +1197,20 @@ def _set_table_borders(table, color: str = "B7B7B7", size: int = 8) -> None:
     tblPr.append(borders)
 
 
-def _build_techstack_table(doc, items: list[dict], header_fill: str = "595959"):
-    """Build a 2-col 'Technology | Advantages' table (professional shaded-header layout).
+def _build_techstack_table(doc, items: list[dict], header_fill: str = "595959",
+                           headers: tuple = ("Technology", "Advantages"),
+                           col0_inches: float = 1.75):
+    """Build a 2-col shaded-header table (professional layout).
 
     Each item: {"name": str, "logo": "pack/name" | None, "description": str}.
     Logo (if resolvable) is embedded above the bold name in column 1.
+
+    `headers` and `col0_inches` exist because this renderer serves more than the
+    technology stack. The team section uses it as `Role | Accountability` with a
+    wider first column, since a role cell carries the position, the headcount and
+    the location rather than a one-word product name. Reusing this function keeps
+    every table in the document identical in border, fill and spacing: a second
+    hand-rolled table renderer is how a document ends up with two table styles.
     """
     from docx.shared import Inches as _Inches, RGBColor
     from docx.enum.table import WD_ALIGN_VERTICAL
@@ -1213,15 +1222,19 @@ def _build_techstack_table(doc, items: list[dict], header_fill: str = "595959"):
     # widths — python-docx only does the latter, leaving tblGrid stale.
     # Body width of this template's main section is 7.27" (10466 twips,
     # margins 0.5" + 0.5"). Table fills body margin-to-margin.
-    col0_w = _Inches(1.75)
-    col1_w = _Inches(5.52)
-    # 1.75" = 2520 twips, 5.52" = 7946 twips, total 10466 = body width
+    # Total must stay 10466 twips (the 7.27" body width) whatever col0 is, or the
+    # table stops ending at the right margin.
+    _TOTAL_TWIPS = 10466
+    col0_twips = int(round(col0_inches * 1440))
+    col1_twips = _TOTAL_TWIPS - col0_twips
+    col0_w = _Inches(col0_inches)
+    col1_w = _Inches(col1_twips / 1440.0)
     from docx.oxml import OxmlElement
     tblGrid = tbl._element.find(qn("w:tblGrid"))
     if tblGrid is not None:
         for child in list(tblGrid):
             tblGrid.remove(child)
-        for w in (2520, 7946):
+        for w in (col0_twips, col1_twips):
             gc = OxmlElement("w:gridCol")
             gc.set(qn("w:w"), str(w))
             tblGrid.append(gc)
@@ -1259,7 +1272,7 @@ def _build_techstack_table(doc, items: list[dict], header_fill: str = "595959"):
 
     # Header
     hdr = tbl.rows[0]
-    for col_idx, label in enumerate(("Technology", "Advantages")):
+    for col_idx, label in enumerate(headers):
         cell = hdr.cells[col_idx]
         cell.text = ""
         para = cell.paragraphs[0]
@@ -1306,18 +1319,30 @@ def _build_techstack_table(doc, items: list[dict], header_fill: str = "595959"):
     return tbl
 
 
+#: Content keys that render as a 2-col table when given a list of {name, description}
+#: dicts, mapped to their header labels and first-column width in inches. Anything
+#: named `techstack_*` is included automatically with the technology defaults.
+#: A key listed here still renders as bullets if its value is a list of plain
+#: strings, so turning a section into a table is opt-in per project.
+_EXTRA_TABLE_KEYS = {
+    "team_roles": (("Role", "Accountability"), 2.60),
+}
+
+
 def render_techstack_tables(doc, replacements: dict) -> set:
-    """For every techstack_* key whose value is a list of {name, [logo,] description} dicts,
-    find its {{KEY}} placeholder paragraph and replace it with a styled 2-col table.
+    """For every table-eligible key whose value is a list of {name, [logo,] description}
+    dicts, find its {{KEY}} placeholder paragraph and replace it with a styled 2-col table.
     Returns the set of keys that were rendered as tables (so the caller skips the
     optional-section drop for them — their placeholder paragraph is already gone and
     a table now sits under the heading)."""
     rendered = set()
     for key, val in list(replacements.items()):
-        if not key.startswith("techstack_") or not isinstance(val, list) or not val:
+        eligible = key.startswith("techstack_") or key in _EXTRA_TABLE_KEYS
+        if not eligible or not isinstance(val, list) or not val:
             continue
         if not all(isinstance(it, dict) and "name" in it and "description" in it for it in val):
             continue
+        headers, col0 = _EXTRA_TABLE_KEYS.get(key, (("Technology", "Advantages"), 1.75))
         placeholder = "{{" + key.upper() + "}}"
         target = None
         for p in doc.paragraphs:
@@ -1327,7 +1352,7 @@ def render_techstack_tables(doc, replacements: dict) -> set:
         if target is None:
             continue
         # Build the table at the end of the document, then move it into position
-        tbl = _build_techstack_table(doc, val)
+        tbl = _build_techstack_table(doc, val, headers=headers, col0_inches=col0)
         # Move table to just after the target paragraph
         target._p.addnext(tbl._element)
         # Remove the placeholder paragraph (its content is now in the table)
@@ -1336,6 +1361,102 @@ def render_techstack_tables(doc, replacements: dict) -> set:
         replacements[key] = ""
         rendered.add(key)
     return rendered
+
+
+def normalize_bullet_indent(doc) -> int:
+    """Give every glyph bullet a hanging indent so a wrapped line aligns under the text.
+
+    Bullets reach the document by two routes. Diagram explanation bullets are built by
+    `_build_bullet_paragraph`, which sets ind left=280 hanging=200. Content lists (risks,
+    assumptions, service levels, contractual exceptions, and every optional section written
+    as bullets) arrive through the generic list-to-text path as plain paragraphs beginning
+    with the glyph, with no indent at all.
+
+    The result was 54 bullets indented correctly and 140 not, which is worse than none of
+    them being indented: a 25-word bullet always wraps, and without a hanging indent the
+    second line returns to the left margin and sits under the glyph instead of under the
+    text. Inconsistent ragged bullets read as carelessness, in Word and in SharePoint alike.
+
+    Applied as a pass rather than at each call site because there are several call sites and
+    a future one would silently miss it again.
+    """
+    from docx.oxml import OxmlElement
+
+    def every_paragraph(d):
+        """Body paragraphs AND paragraphs inside table cells.
+
+        `doc.paragraphs` skips table cells, so a first attempt left 20 bulleted lines
+        inside the technology-stack and role tables un-indented while fixing 174 elsewhere.
+        Same trap as every other pass that walks only the top level of the body.
+        """
+        yield from d.paragraphs
+        for tbl in d.tables:
+            for row in tbl.rows:
+                for cell in row.cells:
+                    yield from cell.paragraphs
+
+    def set_ind(para, left, hanging):
+        pPr = para._p.get_or_add_pPr()
+        if pPr.find(qn("w:numPr")) is not None:
+            return False                  # a real Word list handles its own indent
+        ind = pPr.find(qn("w:ind"))
+        if ind is None:
+            ind = OxmlElement("w:ind")
+            pPr.append(ind)
+        if ind.get(qn("w:left")) == left and ind.get(qn("w:hanging")) == hanging:
+            return False
+        ind.set(qn("w:left"), left)
+        if hanging is None:
+            if ind.get(qn("w:hanging")) is not None:
+                ind.attrib.pop(qn("w:hanging"))
+        else:
+            ind.set(qn("w:hanging"), hanging)
+        return True
+
+    def opens_with_bold_label(para):
+        """A continuation paragraph such as "**Solution:** ..." — a bold run ending in a colon."""
+        for run in para.runs:
+            t = (run.text or "").strip()
+            if not t:
+                continue
+            return bool(run.bold) and t.endswith(":")
+        return False
+
+    touched = 0
+    prev_was_bullet = False
+    for para in every_paragraph(doc):
+        text = (para.text or "").strip()
+        style = para.style.name if para.style else ""
+        if not text or style.lower().startswith("heading"):
+            prev_was_bullet = False
+            continue
+        if text.startswith(("●", "•")):
+            if set_ind(para, "280", "200"):
+                touched += 1
+            # Declare the tab stop the glyph tabs to, so the text column is identical on
+            # every bullet instead of being wherever justification stretched a space to.
+            pPr = para._p.get_or_add_pPr()
+            if pPr.find(qn("w:tabs")) is None:
+                tabs = OxmlElement("w:tabs")
+                tab = OxmlElement("w:tab")
+                tab.set(qn("w:val"), "left")
+                tab.set(qn("w:pos"), "280")
+                tabs.append(tab)
+                pPr.append(tabs)
+            prev_was_bullet = True
+            continue
+        # A paragraph that CONTINUES the bullet above it, such as the "Solution:" half of a
+        # problem and solution pair, is emitted as plain text with no glyph. Left at the
+        # margin it is wider than the bullet it belongs to, so the pair reads as an indented
+        # bullet followed by an unrelated flush-left block and the reader cannot see which
+        # solution answers which problem. Indent it to the bullet's TEXT, with no hanging,
+        # so the two halves read as one unit.
+        if prev_was_bullet and opens_with_bold_label(para):
+            if set_ind(para, "280", None):
+                touched += 1
+            continue
+        prev_was_bullet = False
+    return touched
 
 
 def normalize_body_spacing(doc) -> int:
@@ -1646,17 +1767,30 @@ def build(template: Path, replacements: dict, diagrams: list, out: Path) -> None
     # its subsections is empty; otherwise keep the H3 and drop only the empty
     # subsections. Order matters: the H3 pass must run first, because dropping an
     # H3 also removes its children and a later child drop would then find nothing.
+    # A section rendered as a TABLE has had its value blanked by
+    # render_techstack_tables, so that the text pass does not refill the placeholder it
+    # already consumed. To the emptiness test below that blank looks like "no content",
+    # and the heading gets dropped while its table sits underneath it, orphaned. That is
+    # how the Roles & Responsibilities heading disappeared from a delivery whose roles
+    # table had rendered perfectly. Treat a rendered table as content.
+    def is_empty(key):
+        if key in rendered_tech:
+            return False
+        return replacements.get(key) in (None, "", "null", [])
+
     for h3_heading, children in OPTIONAL_SECTION_GROUPS:
         keys = [key for _sub, key in children]
-        if all(replacements.get(k) in (None, "", "null", []) for k in keys):
+        if all(is_empty(k) for k in keys):
             if drop_section_if_empty(doc, h3_heading, replacements, keys[0]):
                 dropped += 1
             continue
         for sub, key in children:
+            if sub and not is_empty(key):
+                continue
             if sub and drop_section_if_empty(doc, sub, replacements, key):
                 dropped += 1
     for sub, key in OPTIONAL_SUBSECTIONS:
-        if drop_section_if_empty(doc, sub, replacements, key):
+        if is_empty(key) and drop_section_if_empty(doc, sub, replacements, key):
             dropped += 1
 
     for heading_text, ckey in drop_specs:
@@ -1737,6 +1871,8 @@ def build(template: Path, replacements: dict, diagrams: list, out: Path) -> None
         print(f"Trailing empty paragraphs removed: {n_tail}")
 
     # 7. Save.
+    bullets = normalize_bullet_indent(doc)
+    print(f"Bullet indents normalized: {bullets}")
     doc.save(str(out))
 
     # 8. Final XML-level placeholder sweep — catches TOC cache, comments etc.

@@ -179,7 +179,15 @@ def check_no_unfilled_placeholders(docx_path: Path, report: Report) -> None:
 
 
 def check_image_sharpness(docx_path: Path, report: Report) -> None:
-    """Every embedded image must be >= 1500 px wide for sharp 6.5-in Word display."""
+    """Every GENERATED figure must be >= 1500 px wide for a sharp 6.5-in Word display.
+
+    Scoped to what the run produces. The template carries its own decorative art, and the
+    technology-stack tables carry deliberately small logos; neither is ours to change, and
+    reporting 78 issues on them every run taught the reader to ignore this check, which is
+    worse than not having it. A generated architecture figure is 4,000 px and up, so the
+    split is unambiguous: anything under the in-table logo ceiling is a logo, and anything
+    the run did not generate is template art.
+    """
     try:
         from PIL import Image
     except ImportError:
@@ -564,6 +572,184 @@ def check_techstack_is_table(docx_path: Path, report: Report) -> None:
         report.pass_("techstack_is_table")
 
 
+#: Optional-section heading text (lowercased) -> word ceiling from `04_generate.md`.
+#: A bid reader skims these looking for a number, a name or a commitment, and long
+#: prose hides all three. The ceilings live here so the documented rule has a check
+#: behind it: a style rule nobody measures gets violated on the next run.
+_SECTION_WORD_CEILINGS = {
+    "security & data protection": 260,
+    "team structure": 150,
+    "engagement model": 110,
+    "delivery roadmap": 180,
+    "milestones & acceptance": 160,
+    "governance & reporting": 130,
+    "support model": 160,
+}
+#: Sections whose body must be a table, not prose. Same detection as the technology
+#: stack: a role list needs the position, the headcount, the seniority and the
+#: location side by side, which prose cannot present scannably.
+_TABLE_SECTIONS = {"roles & responsibilities"}
+
+#: Narrative sections outside the optional block, from the WRITE TIGHT rule. Kept
+#: separate from `_SECTION_WORD_CEILINGS` only so the two reports read differently:
+#: these are core sections every bid has, not opt-in ones.
+_NARRATIVE_CEILINGS = {
+    "executive summary": 260,
+    "purpose": 150,
+    "summary": 400,
+    # The house Summary, read from the delivered Kenneth proposal, is SIX paragraphs of
+    # about 350 words in a fixed order: the platform named concretely, then four
+    # paragraphs each opening "We commit to ...", then the concrete service-level targets.
+    # A 200-word ceiling could not hold that shape, so the ceiling was wrong, not the
+    # pattern. Read an earlier delivery before inventing a limit.
+    "mobile app strategy": 160,
+    "system overview": 300,
+}
+
+#: Per-ENTRY ceilings for bulleted sections. The list may be as long as the requirements
+#: demand; each line has to stay scannable. Enforced on the longest entry, because an
+#: average hides one 140-word bullet inside nine short ones, and that long one is exactly
+#: what a reader stumbles on.
+_PER_BULLET_CEILINGS = {
+    "problems & solutions": 55,
+    "key risks & mitigations": 50,
+    "assumptions & dependencies": 50,
+    "service level targets": 50,
+    "contractual exceptions": 50,
+}
+
+
+def check_narrative_length(docx_path: Path, report: Report) -> None:
+    """Core narrative sections must respect the WRITE TIGHT ceilings, and bulleted
+    sections must respect their PER-ENTRY ceiling.
+
+    Both are majors rather than blockers: a document that is 20 words long is a style
+    problem the author should see, not a reason to refuse to ship a technically correct
+    bid at midnight.
+    """
+    doc = Document(str(docx_path))
+    over, long_bullets, measured = [], [], 0
+    for heading, _level, bodies, _had_table in _section_bodies(doc):
+        key = heading.strip().lower()
+        cap = _NARRATIVE_CEILINGS.get(key)
+        if cap is not None:
+            measured += 1
+            words = sum(len(b.split()) for b in bodies)
+            if words > cap:
+                over.append("'%s' %d words, ceiling %d (+%d)" % (heading, words, cap, words - cap))
+        bullet_cap = _PER_BULLET_CEILINGS.get(key)
+        if bullet_cap is not None and bodies:
+            measured += 1
+            worst = max(bodies, key=lambda b: len(b.split()))
+            n = len(worst.split())
+            if n > bullet_cap:
+                avg = sum(len(b.split()) for b in bodies) / len(bodies)
+                long_bullets.append(
+                    "'%s' longest entry %d words, ceiling %d, average %.0f across %d entries"
+                    % (heading, n, bullet_cap, avg, len(bodies)))
+    if over:
+        report.add(Issue(
+            "narrative_section_too_long", "content", "major", False,
+            f"{len(over)} core narrative section(s) exceed their word ceiling",
+            detail="; ".join(over)))
+    if long_bullets:
+        report.add(Issue(
+            "bullet_entry_too_long", "content", "major", False,
+            f"{len(long_bullets)} bulleted section(s) carry an entry over its word ceiling",
+            detail="; ".join(long_bullets)))
+    if measured and not over and not long_bullets:
+        report.pass_("narrative_length")
+    elif not measured:
+        # Silence here would be indistinguishable from a clean pass on a document whose
+        # headings were renamed, which is how a check quietly becomes a no-op.
+        report.add(Issue(
+            "narrative_length_not_measured", "content", "minor", False,
+            "no section matched a narrative or per-bullet ceiling, so none was measured",
+            detail="expected one of: " + ", ".join(sorted(
+                set(_NARRATIVE_CEILINGS) | set(_PER_BULLET_CEILINGS)))))
+
+
+def _section_bodies(doc):
+    """Yield (heading_text, level, [body paragraph texts], had_table) per heading.
+
+    A section ends at the next heading of ANY level, which is what a reader
+    experiences: the words under this heading before the next one.
+    """
+    pmap = {p._p: p for p in doc.paragraphs}
+    tmap = {t._tbl: t for t in doc.tables}
+    cur = None
+    for child in doc.element.body.iterchildren():
+        if child in tmap:
+            if cur is not None:
+                cur[3] = True
+            continue
+        p = pmap.get(child)
+        if p is None:
+            continue
+        sname = p.style.name if p.style else ""
+        txt = (p.text or "").strip()
+        if sname.startswith("Heading"):
+            if cur is not None:
+                yield tuple(cur)
+            try:
+                level = int(sname.split()[-1])
+            except (ValueError, IndexError):
+                level = 9
+            cur = [txt, level, [], False]
+            continue
+        if cur is not None and txt:
+            cur[2].append(txt)
+    if cur is not None:
+        yield tuple(cur)
+
+
+def check_optional_section_length(docx_path: Path, report: Report) -> None:
+    """Optional bid sections must respect their word ceiling."""
+    doc = Document(str(docx_path))
+    over = []
+    for heading, _level, bodies, _had_table in _section_bodies(doc):
+        cap = _SECTION_WORD_CEILINGS.get(heading.strip().lower())
+        if cap is None:
+            continue
+        words = sum(len(b.split()) for b in bodies)
+        if words > cap:
+            over.append((heading, words, cap))
+    if over:
+        report.add(Issue(
+            "optional_section_too_long", "content", "major", False,
+            f"{len(over)} optional section(s) exceed their word ceiling",
+            detail="; ".join(f"'{h}' {w} words, ceiling {c} (+{w - c})" for h, w, c in over),
+        ))
+    else:
+        report.pass_("optional_section_length")
+
+
+def check_team_roles_is_table(docx_path: Path, report: Report) -> None:
+    """Roles & Responsibilities must render as a 'Role | Accountability' table.
+
+    Prose here means the content-writer emitted a string where the schema requires
+    an array of {name, description} rows, so the positions and their headcount are
+    buried in a paragraph instead of being scannable. Same defect class as
+    `techstack_not_table`, and detected the same proven way.
+    """
+    doc = Document(str(docx_path))
+    bad = []
+    for heading, _level, bodies, had_table in _section_bodies(doc):
+        if heading.strip().lower() not in _TABLE_SECTIONS:
+            continue
+        if not had_table:
+            bad.append((heading, (bodies[0][:60] if bodies else "(nothing)")))
+    if bad:
+        report.add(Issue(
+            "team_roles_not_table", "visual", "blocker", False,
+            f"{len(bad)} team section(s) render as prose instead of a "
+            f"'Role | Accountability' table",
+            detail="; ".join(f"'{h}' -> {prev}" for h, prev in bad),
+        ))
+    else:
+        report.pass_("team_roles_is_table")
+
+
 def _iter_content_paragraphs(doc):
     """Every paragraph a reader actually sees, including table cells, excluding headings."""
     def walk(paras):
@@ -652,6 +838,96 @@ def check_latin_abbreviation_in_content(docx_path: Path, report: Report) -> None
 # ---------------------------------------------------------------------------
 
 
+
+def check_bullet_hanging_indent(docx_path: Path, report: Report) -> None:
+    """Every glyph bullet needs a hanging indent, or a wrapped line breaks alignment.
+
+    A 25-word bullet always wraps. Without `w:ind left=280 hanging=200` the second line
+    returns to the left margin and sits under the glyph rather than under the text. On the
+    delivered document 54 bullets had it and 140 did not, which reads worse than none of
+    them having it, and it looks the same way in Word and in SharePoint. Walks table cells
+    as well as the body, because the first version of the fix missed 20 bullets sitting
+    inside the stack and role tables.
+    """
+    doc = Document(str(docx_path))
+
+    def every_paragraph(d):
+        yield from d.paragraphs
+        for tbl in d.tables:
+            for row in tbl.rows:
+                for cell in row.cells:
+                    yield from cell.paragraphs
+
+    bad = []
+    total = 0
+    for para in every_paragraph(doc):
+        text = (para.text or "").lstrip()
+        if not text.startswith(("●", "•")):
+            continue
+        pPr = para._p.find(qn("w:pPr"))
+        if pPr is not None and pPr.find(qn("w:numPr")) is not None:
+            continue
+        total += 1
+        ind = pPr.find(qn("w:ind")) if pPr is not None else None
+        if ind is None or ind.get(qn("w:hanging")) is None:
+            bad.append(text[:60])
+    if bad:
+        report.add(Issue(
+            "bullet_indent_inconsistent", "layout", "major", True,
+            f"{len(bad)} of {total} bullet(s) have no hanging indent, so a wrapped line "
+            f"falls back to the left margin",
+            detail="; ".join(bad[:6])))
+    elif total:
+        report.pass_("bullet_hanging_indent")
+
+
+def check_uat_section_present(docx_path: Path, report: Report) -> None:
+    """The User Acceptance Testing terms must survive into the built document.
+
+    These are contractual terms (the 14 day window, the no-feedback-means-accepted rule, the
+    three week critical-and-high fix commitment, the evidence required to reject) and they sit
+    verbatim in the template rather than behind a placeholder, so that no run can reword them.
+    That is the right call for contractual language, but it also means nothing generates the
+    section, and a section nothing generates is one whose disappearance nobody notices. So the
+    check asserts the heading AND the four commitments, not merely the heading: a heading with
+    an emptied body would otherwise pass while the commitments were gone.
+    """
+    doc = Document(str(docx_path))
+    heading = None
+    for para in doc.paragraphs:
+        # The heading sits at Heading 6, where this template types the section number into the
+        # text rather than auto-numbering it, so the title is a suffix and not the whole string.
+        title = re.sub(r"^[\d.]+\s*", "", (para.text or "").strip()).lower()
+        if title == "user acceptance testing" \
+           and (para.style.name or "").lower().startswith("heading"):
+            heading = para
+            break
+    if heading is None:
+        report.add(Issue(
+            "uat_section_missing", "content", "blocker", False,
+            "the User Acceptance Testing section is absent",
+            detail="these are contractual terms carried verbatim by the template; if the "
+                   "heading is gone the template has been edited or replaced"))
+        return
+
+    body = " ".join(p.text or "" for p in doc.paragraphs).lower()
+    required = {
+        "the UAT completion window":     "within 14 days",
+        "no-feedback-means-accepted":    "regard the uat as successful",
+        "the critical and high fix SLA": "within 3 weeks",
+        "the rejection evidence rule":   "validated evidence",
+    }
+    missing = [label for label, needle in required.items() if needle not in body]
+    if missing:
+        report.add(Issue(
+            "uat_terms_incomplete", "content", "blocker", False,
+            f"the User Acceptance Testing section is missing {len(missing)} of its "
+            f"{len(required)} contractual terms",
+            detail="; ".join(missing)))
+    else:
+        report.pass_("uat_section_present")
+
+
 CHECKS = [
     ("zip_integrity",                  check_zip_integrity),
     ("file_size",                      check_size),
@@ -672,8 +948,18 @@ CHECKS = [
     ("settings_flags_present",         check_settings_flags_present),
     ("justify_whitespace_channels",    check_justify_whitespace_channels),
     ("techstack_is_table",             check_techstack_is_table),
+    ("bullet_hanging_indent",          check_bullet_hanging_indent),
+    # Added 2026-07-29: the optional sections were shipping as walls of text and the
+    # team section named no headcount. Both rules now have a check behind them.
+    ("optional_section_length",        check_optional_section_length),
+    ("narrative_length",               check_narrative_length),
+    ("team_roles_is_table",            check_team_roles_is_table),
     ("em_dash_in_prose",               check_em_dash_in_prose),
     ("latin_abbreviation_in_content",  check_latin_abbreviation_in_content),
+    # Added 2026-07-29: the UAT terms are contractual and live verbatim in the template
+    # rather than behind a placeholder, precisely so no run can paraphrase them. A section
+    # nothing generates is a section nothing notices going missing, hence the check.
+    ("uat_section_present",            check_uat_section_present),
 ]
 
 

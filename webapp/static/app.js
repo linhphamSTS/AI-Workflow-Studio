@@ -2,7 +2,7 @@
 const App = (() => {
   let current = null, detail = null, manifest = null, pollTimer = null, pendingFiles = [];
   let sectionCatalogue = [];   // optional bid sections, served by /api/optional-sections
-  let selVer = null, cmpMode = false, cmpA = null, cmpB = null, folderName = '', histView = false, planCache = null;
+  let selVer = null, cmpMode = false, cmpA = null, cmpB = null, folderName = '', histView = false, planCache = null, wbsPlanCache = null;
 
   // ---------- inline SVG icons (no external assets) ----------
   const P = {
@@ -35,6 +35,15 @@ const App = (() => {
   const $ = (s, r = document) => r.querySelector(s);
   const el = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstChild; };
   const esc = (s) => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  // A workspace is one of three types. Centralised so a fourth does not mean hunting
+  // through every ternary in this file.
+  const TYPES = {
+    diagram:  { label: 'Diagram',            noun: 'diagram',  badge: 'diagram'  },
+    proposal: { label: 'Technical Proposal', noun: 'proposal', badge: 'proposal' },
+    wbs:      { label: 'WBS + Cost',         noun: 'estimate', badge: 'wbs'      },
+  };
+  const T = t => TYPES[t] || TYPES.diagram;
 
   // ---------- custom modals (replace browser confirm/prompt) ----------
   function modalConfirm({ title, message, okText = 'Confirm', danger = false }) {
@@ -95,7 +104,7 @@ const App = (() => {
     const ov = el(`<div class="modal-ov"><div class="modal wide">
       <div class="modal-head"><div class="mi">${ic('info')}</div><h3>How to use AI Workflow Studio</h3></div>
       <div class="modal-body help-body">
-        <p>Turn a plain-language idea into a senior-SA-grade <b>diagram</b>, or a folder of RFP docs into a full <b>technical proposal .docx</b> — analysed, confirmed by you at a gate, generated, versioned, and exportable. The steps below apply to both (a proposal analyses a document folder instead of a prompt, and produces a .docx).</p>
+        <p>Turn a plain-language idea into a senior-SA-grade <b>diagram</b>, a folder of bid docs into a priced <b>WBS + cost estimation</b>, or a folder of RFP docs into a full <b>technical proposal .docx</b> — analysed, confirmed by you at a gate, generated, versioned, and exportable. The steps below apply to both (a proposal analyses a document folder instead of a prompt, and produces a .docx).</p>
         <div class="help-steps">${stepHTML}</div>
         <div class="help-tips"><div class="hs-t">Good to know</div><ul>${tips.map(t => `<li>${t}</li>`).join('')}</ul></div>
       </div>
@@ -134,7 +143,7 @@ const App = (() => {
     const box = $('#ws-list'); box.innerHTML = '';
     if (!items.length) { box.appendChild(el('<div class="side-empty">No workspaces yet.<br>Create one to begin.</div>')); return; }
     items.forEach(w => {
-      const tb = w.type === 'proposal' ? '<span class="tbadge proposal">Proposal</span>' : '<span class="tbadge diagram">Diagram</span>';
+      const tb = `<span class="tbadge ${T(w.type).badge}">${T(w.type).label}</span>`;
       const node = el(`<div class="ws-item ${w.id === current ? 'active' : ''}" data-id="${w.id}">
         <div class="n">${esc(w.name)}</div>
         <div class="meta">${tb}<span class="pill ${w.status}">${w.status}</span>${w.n_diagrams ? `<span>· ${w.n_diagrams}</span>` : ''}</div></div>`);
@@ -155,6 +164,19 @@ const App = (() => {
               <div class="wt-t">Diagram</div><div class="wt-d">One SA-grade diagram from a prompt or docs. Fast, local render.</div></button>
             <button class="wtype" data-t="proposal" type="button"><div class="wt-ic">${ic('doc2')}</div>
               <div class="wt-t">Technical Proposal</div><div class="wt-d">A full proposal <b>.docx</b> from a folder of RFP + docs.</div></button>
+            <button class="wtype" data-t="wbs" type="button"><div class="wt-ic">${ic('grid')}</div>
+              <div class="wt-t">WBS + Cost</div><div class="wt-d">A priced work breakdown <b>.xlsx</b> plus a cloud <b>cost estimation</b>, from a folder of bid docs.</div></button>
+          </div>
+          <div class="wtype-sub" id="wbs-mode-row" style="display:none">
+            <div class="wtype-q" style="margin-top:14px">Is there already a WBS?</div>
+            <div class="wtype-grid two">
+              <button class="wtype" data-m="fill" type="button"><div class="wt-ic">${ic('grid')}</div>
+                <div class="wt-t">The client supplied one</div>
+                <div class="wt-d">Estimate only. Their workbook is the deliverable: the hours go into their effort columns and their structure, wording and styling are left exactly as they are. A cost estimation is produced alongside it.</div></button>
+              <button class="wtype" data-m="author" type="button"><div class="wt-ic">${ic('doc2')}</div>
+                <div class="wt-t">No, design it</div>
+                <div class="wt-d">The breakdown is designed from the documents first, then estimated, then built. Use this when there is only an RFP. A cost estimation is produced alongside it.</div></button>
+            </div>
           </div>
           <div class="field" style="margin-top:16px"><label>Name</label>
             <input type="text" id="nw-name" placeholder="e.g. Payments Platform"></div>
@@ -163,15 +185,29 @@ const App = (() => {
           <button class="btn primary" data-a="ok" disabled>Create</button></div>
       </div></div>`);
       const okBtn = ov.querySelector('[data-a=ok]'), nameIn = ov.querySelector('#nw-name');
-      ov.querySelectorAll('.wtype').forEach(b => b.onclick = () => {
+      let wbsMode = null;
+      ov.querySelectorAll('.wtype[data-t]').forEach(b => b.onclick = () => {
         type = b.dataset.t;
-        ov.querySelectorAll('.wtype').forEach(x => x.classList.toggle('on', x === b));
-        okBtn.disabled = false;
-        if (!nameIn.value.trim()) nameIn.value = type === 'proposal' ? 'Untitled proposal' : 'Untitled diagram';
+        ov.querySelectorAll('.wtype[data-t]').forEach(x => x.classList.toggle('on', x === b));
+        const row = ov.querySelector('#wbs-mode-row');
+        // The two situations need different work, and picking between them later means
+        // discovering halfway through that the wrong one was assumed.
+        row.style.display = type === 'wbs' ? 'block' : 'none';
+        if (type !== 'wbs') { wbsMode = null; okBtn.disabled = false; }
+        else { okBtn.disabled = !wbsMode; }
+        if (!nameIn.value.trim()) nameIn.value = 'Untitled ' + T(type).noun;
         nameIn.focus();
       });
+      ov.querySelectorAll('.wtype[data-m]').forEach(b => b.onclick = () => {
+        wbsMode = b.dataset.m;
+        ov.querySelectorAll('.wtype[data-m]').forEach(x => x.classList.toggle('on', x === b));
+        okBtn.disabled = false;
+        if (!nameIn.value.trim()) nameIn.value = 'Untitled estimate';
+      });
       const done = v => { ov.remove(); document.removeEventListener('keydown', key); resolve(v); };
-      const ok = () => { if (!type) return; done({ name: nameIn.value.trim() || (type === 'proposal' ? 'Untitled proposal' : 'Untitled diagram'), type }); };
+      const ok = () => { if (!type) return; if (type === 'wbs' && !wbsMode) return;
+        done({ name: nameIn.value.trim() || ('Untitled ' + T(type).noun), type,
+               wbs_mode: wbsMode }); };
       const key = e => { if (e.key === 'Escape') done(null); if (e.key === 'Enter' && type) { e.preventDefault(); ok(); } };
       ov.addEventListener('mousedown', e => { if (e.target === ov) done(null); });
       ov.querySelector('[data-a=c]').onclick = () => done(null);
@@ -183,7 +219,8 @@ const App = (() => {
   async function newWorkspace() {
     const res = await modalNewWorkspace();
     if (!res) return;
-    const w = await api('POST', '/api/workspaces', { name: res.name, type: res.type });
+    const w = await api('POST', '/api/workspaces',
+      { name: res.name, type: res.type, wbs_mode: res.wbs_mode || null });
     await loadList(); select(w.id);
   }
 
@@ -241,7 +278,7 @@ const App = (() => {
     // show the creation time in the user's own machine timezone (not UTC)
     let created = d.created || '';
     try { const dt = new Date(d.created); if (!isNaN(dt)) created = dt.toLocaleString(); } catch (e) {}
-    const tbadge = d.type === 'proposal' ? '<span class="tbadge proposal">Technical Proposal</span>' : '<span class="tbadge diagram">Diagram</span>';
+    const tbadge = `<span class="tbadge ${T(d.type).badge}">${T(d.type).label}</span>`;
     let body = `<div class="ws-head">
         <input class="ws-title" id="ws-title" value="${esc(d.name)}" readonly>
         <button class="btn ghost sm" title="Rename this workspace" onclick="App.rename()">${ic('edit')}</button>
@@ -252,26 +289,33 @@ const App = (() => {
     if (d.error) body += `<div class="errbox">${ic('warn')}<span>${esc(d.error)}</span></div>`;
 
     const isProp = d.type === 'proposal';
+    const isWbs  = d.type === 'wbs';
     const versions = d.versions || [];
     if (histView && versions.length) {
-      body += isProp ? viewProposalPreview() : viewPreview();
+      body += isWbs ? viewWbsPreview() : (isProp ? viewProposalPreview() : viewPreview());
     } else {
       if (d.status === 'new') body += viewInputs();
-      else if (d.status === 'refining') body += isProp
-        ? viewWorking('Analyzing the RFP + docs', 'Running the technical-proposal skill (Phase 0–3) via the claude CLI: it ingests the docs and proposes a tech stack + architecture, then stops for your review. Usually a few minutes.')
-        : viewWorking('Refining your request', 'Running the skill via the claude CLI to build a rigorous spec. This usually takes 3–5 minutes — it reads the diagram knowledge base and designs the spec, then stops for your review.');
-      else if (d.status === 'refined') body += isProp ? viewProposalReview() : viewReview();
-      else if (d.status === 'generating') body += isProp
-        ? viewWorking('Building the proposal', 'Drawing the diagrams, assembling the .docx, and running the strict format review. This is a big agent run — it can take 10–30 minutes. You can watch the job log.')
-        : viewWorking('Rendering diagrams', 'Deterministic local renderers: PNG + SVG + editable .drawio + Word .docx.');
-      else if (d.status === 'generated') body += isProp ? viewProposalPreview() : viewPreview();
+      else if (d.status === 'refining') body += isWbs
+        ? viewWorking('Analysing the bid documents', 'Running the WBS skill (Phase 0–3) via the claude CLI: it reads the folder, works out whether the client supplied a WBS to fill or only an RFP to break down, then designs the module structure and the factor stack and stops for your review.')
+        : (isProp
+          ? viewWorking('Analyzing the RFP + docs', 'Running the technical-proposal skill (Phase 0–3) via the claude CLI: it ingests the docs and proposes a tech stack + architecture, then stops for your review. Usually a few minutes.')
+          : viewWorking('Refining your request', 'Running the skill via the claude CLI to build a rigorous spec. This usually takes 3–5 minutes — it reads the diagram knowledge base and designs the spec, then stops for your review.'));
+      else if (d.status === 'refined') body += isWbs ? viewWbsReview() : (isProp ? viewProposalReview() : viewReview());
+      else if (d.status === 'generating') body += isWbs
+        ? viewWorking('Estimating and pricing', 'Estimating every leaf task, fetching real cloud prices from the vendor API, then building and verifying the work breakdown and the cost estimation. The longest job in the app: 20–60 minutes.')
+        : (isProp
+          ? viewWorking('Building the proposal', 'Drawing the diagrams, assembling the .docx, and running the strict format review. This is a big agent run — it can take 10–30 minutes. You can watch the job log.')
+          : viewWorking('Rendering diagrams', 'Deterministic local renderers: PNG + SVG + editable .drawio + Word .docx.'));
+      else if (d.status === 'generated') body += isWbs ? viewWbsPreview() : (isProp ? viewProposalPreview() : viewPreview());
       else if (d.status === 'error') body += viewError();
       if (versions.length && d.status !== 'generated') body += viewHistoryStrip();
     }
 
     v.innerHTML = body;
     if (!histView && d.status === 'new') wireInputs();
-    if (!histView && d.status === 'refined') { if (isProp) loadPlanInto(); else loadManifestInto(); }
+    if (!histView && d.status === 'refined') {
+      if (isWbs) loadWbsPlanInto(); else if (isProp) loadPlanInto(); else loadManifestInto();
+    }
   }
 
   // ---------- INPUTS ----------
@@ -438,7 +482,172 @@ const App = (() => {
     catch (e) { toast('Invalid JSON: ' + e.message, true); }
   }
 
+
+  // ---------- WBS: plan gate ----------
+  function viewWbsReview() {
+    return `<div class="card">
+      <div class="card-head"><div class="hi">${ic('check')}</div><div><h3>Review the estimate plan</h3><div class="sub">Confirm the breakdown, the columns and the factor stack before any hours are written. Changing this later means re-touching every row.</div></div></div>
+      <div class="card-body" id="wbs-plan-body"><div class="working"><div class="orbit"></div><div class="wt">Loading plan…</div></div></div>
+    </div>`;
+  }
+
+  async function loadWbsPlanInto() {
+    let plan;
+    try { plan = await api('GET', '/api/workspaces/' + current + '/wbs-plan'); }
+    catch (e) { $('#wbs-plan-body').innerHTML = `<div class="errbox">${ic('warn')}<span>${esc(e.message)}</span></div>`; return; }
+    wbsPlanCache = plan;
+
+    const mods = Array.isArray(plan.modules) ? plan.modules : [];
+    const modRows = mods.map(m => `<tr><td>${esc(m.id || '')}</td><td><b>${esc(m.title || '')}</b></td>
+      <td>${esc(m.purpose || '')}</td><td style="text-align:center">${esc(String(m.leaf_estimate ?? ''))}</td></tr>`).join('');
+
+    // The factor stack is the thing this gate exists for. An estimate that applied only the
+    // downward factors and forgot the upward ones understated a real bid by 218 hours, so the
+    // direction is shown per row rather than left to be inferred from the wording.
+    const facts = Array.isArray(plan.factors) ? plan.factors : [];
+    const down = facts.filter(f => (f.direction || '').toLowerCase() === 'down');
+    const up   = facts.filter(f => (f.direction || '').toLowerCase() === 'up');
+    const factRow = f => `<tr><td>${(f.direction || '').toLowerCase() === 'up'
+        ? '<span class="fdir up">increases</span>' : '<span class="fdir down">reduces</span>'}</td>
+      <td><b>${esc(f.name || '')}</b></td><td style="text-align:center">${esc(f.value || '')}</td>
+      <td>${esc(f.applies_to || '')}</td><td>${esc(f.reason || '')}</td></tr>`;
+
+    const cloud = plan.cloud || {};
+    const rejected = Array.isArray(cloud.rejected) ? cloud.rejected : [];
+    const list = (arr, title) => (Array.isArray(arr) && arr.length)
+      ? `<div class="hs-t" style="margin:16px 0 6px">${title}</div><ul class="plainlist">`
+        + arr.map(x => `<li>${esc(typeof x === 'string' ? x : JSON.stringify(x))}</li>`).join('') + '</ul>'
+      : '';
+
+    $('#wbs-plan-body').innerHTML = `
+      ${plan.summary ? `<div class="summary">${ic('info')}<span>${esc(plan.summary)}</span></div>` : ''}
+      <div class="review-count">Project: <b>${esc(plan.project || '(unnamed)')}</b>
+        &nbsp;·&nbsp; mode: <b>${esc(plan.mode || '?')}</b>
+        ${plan.mode_reason ? `<span class="sub"> — ${esc(plan.mode_reason)}</span>` : ''}</div>
+
+      ${modRows ? `<div class="hs-t" style="margin:14px 0 6px">Breakdown
+          <span class="seccount">${mods.length} module(s)</span></div>
+        <div class="tbl-wrap"><table class="ptbl"><thead><tr><th>#</th><th>Module</th><th>Purpose</th><th>Leaf tasks</th></tr></thead>
+        <tbody>${modRows}</tbody></table></div>`
+      : `<div class="errbox">${ic('warn')}<span>The analysis wrote no modules. Open the plan JSON below to see what it produced.</span></div>`}
+
+      ${Array.isArray(plan.columns) && plan.columns.length ? `<div class="hs-t" style="margin:16px 0 6px">Effort columns</div>
+        <div class="rat"><b>${plan.columns.map(esc).join(' · ')}</b>${plan.columns_reason ? '<br>' + esc(plan.columns_reason) : ''}</div>` : ''}
+
+      ${facts.length ? `<div class="hs-t" style="margin:16px 0 6px">Factor stack
+          <span class="seccount">${down.length} reduce · ${up.length} increase</span></div>
+        ${up.length === 0 ? `<div class="warnbox">${ic('warn')}<span>Every factor here reduces the estimate and none increases it. That is the shape of a known under-count: integration buffers, missing sandboxes, legacy protocols and rows that bundle several integrations all push hours UP. Check this before confirming.</span></div>` : ''}
+        <div class="tbl-wrap"><table class="ptbl"><thead><tr><th>Direction</th><th>Factor</th><th>Value</th><th>Applies to</th><th>Why</th></tr></thead>
+        <tbody>${facts.map(factRow).join('')}</tbody></table></div>`
+      : `<div class="warnbox">${ic('warn')}<span>No factor stack was proposed. An estimate with no stated factors cannot be audited later.</span></div>`}
+
+      <div class="hs-t" style="margin:16px 0 6px">Cloud for the cost estimation</div>
+      ${cloud.provider && cloud.provider !== 'undecided'
+        ? `<div class="rat"><b>${esc(cloud.provider)} · ${esc(cloud.region || '')}</b><br>${esc(cloud.reason || '')}
+           ${rejected.length ? '<br><em>rejected: ' + rejected.map(r => esc((r.candidate || '') + ' — ' + (r.failed || ''))).join('; ') + '</em>' : ''}</div>`
+        : `<div class="warnbox">${ic('warn')}<span>No cloud is settled yet, so the cost sheet will price the recommendation and record the choice as an open question. Prices are always fetched live from the vendor API, never recalled.</span></div>`}
+      ${plan.cost_scope ? `<div class="rat" style="margin-top:8px">${esc(plan.cost_scope)}</div>` : ''}
+
+      ${list(plan.assumptions, 'Assumptions')}
+      ${list(plan.open_questions, 'Open questions')}
+      ${list(plan.out_of_scope, 'Out of scope')}
+
+      <details class="spec-edit"><summary>${ic('chevron')} Edit plan JSON (advanced)</summary>
+        <textarea class="mono" id="wbs-plan-json" rows="18" style="margin-top:12px">${esc(JSON.stringify(plan, null, 2))}</textarea>
+        <div class="row end" style="margin-top:10px"><button class="btn sm" onclick="App.saveWbsPlan()">${ic('check')} Save edits</button></div>
+      </details>
+
+      <div class="row" style="margin-top:20px">
+        <button class="btn ghost" onclick="App.backToInputs()">${ic('edit')} Edit inputs &amp; re-analyse</button>
+        <div class="spacer"></div>
+        <button class="btn primary lg" onclick="App.generate()">${ic('play')} Estimate &amp; price (2 workbooks)</button>
+      </div>`;
+  }
+
+  async function showStack() {
+    const box = $('#pp-stack');
+    if (box) box.innerHTML = `<div class="working"><div class="orbit"></div><div class="wt">Loading the plan…</div></div>`;
+    try { planCache = await api('GET', '/api/workspaces/' + current + '/plan'); }
+    catch (e) { if (box) box.innerHTML = `<div class="errbox">${ic('warn')}<span>${esc(e.message)}</span></div>`; return; }
+    render();
+  }
+
+  async function saveWbsPlan() {
+    const ta = $('#wbs-plan-json');
+    if (!ta) return;
+    let parsed;
+    try { parsed = JSON.parse(ta.value); }
+    catch (e) { toast('That is not valid JSON: ' + e.message, true); return; }
+    try {
+      await api('PUT', '/api/workspaces/' + current + '/wbs-plan', parsed);
+      toast('Plan saved'); await refresh();
+    } catch (e) { toast(e.message, true); }
+  }
+
+  // ---------- WBS: ready ----------
+  function viewWbsPreview() {
+    const versions = detail.versions || [];
+    if (!versions.length) return `<div class="card"><div class="card-body"><div class="errbox">${ic('warn')}<span>No workbook produced.</span></div></div></div>`;
+    if (selVer == null || !versions.some(v => v.id === selVer)) selVer = detail.current_version ?? versions[versions.length - 1].id;
+    const v = verById(selVer);
+    const base = `/api/workspaces/${current}/versions/${v.id}/preview/`;
+    const back = histView ? `<button class="btn ghost sm" onclick="App.closeHistory()" style="margin-bottom:14px">← Back to ${esc(detail.status)}</button>` : '';
+    const book = (name, title, sub) => name ? `<div class="docx-hero"><div class="dh-ic">${ic('grid')}</div>
+        <div class="dh-txt"><div class="dh-t">${esc(name)}</div><div class="dh-s">${esc(sub)}</div></div>
+        <a class="btn primary" href="${base}${encodeURIComponent(name)}" download>${ic('download')} Download</a></div>`
+      : `<div class="warnbox">${ic('warn')}<span>${esc(title)} was not produced by this run. A bid needs both the hours and the running cost.</span></div>`;
+    return `${back}<div class="card">
+      <div class="card-head"><div class="hi">${ic('grid')}</div><div><h3>${histView ? 'Version history' : 'Estimate ready'}</h3><div class="sub">${versions.length} version${versions.length > 1 ? 's' : ''} — two workbooks: the priced breakdown and the cloud cost.</div></div></div>
+      <div class="card-body">
+        ${timelineHTML()}
+        ${book(v.wbs, 'The work breakdown', 'Work breakdown with man-hours, verifier clean')}
+        ${book(v.cost, 'The cost estimation', 'Cloud cost, every unit price fetched from the vendor API')}
+        ${v.report ? `<details class="spec-edit"><summary>${ic('chevron')} Run report</summary><div class="log" style="margin-top:10px"><pre>${esc(v.report)}</pre></div></details>` : ''}
+      </div>
+      <div class="card-foot">
+        <button class="btn ghost" onclick="App.backToInputs()">${ic('edit')} Edit inputs</button>
+        <button class="btn" onclick="App.reopenWbsPlan()">${ic('code')} Edit plan &amp; re-estimate</button>
+        <div class="spacer"></div>
+        <button class="btn primary lg" onclick="App.exportZip()">${ic('download')} Export v${selVer} (zip)</button>
+      </div>
+    </div>`;
+  }
+
+  async function reopenWbsPlan() {
+    const p = wbsPlanCache || await api('GET', '/api/workspaces/' + current + '/wbs-plan');
+    await api('PUT', '/api/workspaces/' + current + '/wbs-plan', p);
+    histView = false; selVer = null; await refresh();
+  }
+
   // ---------- PROPOSAL: plan gate ----------
+  // Shared by the gate and the finished view. The stack was only rendered at the gate, so
+  // once a proposal was generated there was no longer anywhere in the app that showed which
+  // technologies had been chosen; reading it meant opening plan.json by hand. A decision the
+  // user approved should stay visible after they approve it.
+  function stackTableHTML(plan, heading) {
+    const rawStack = plan && plan.tech_stack;
+    let rows = [];
+    if (Array.isArray(rawStack)) rows = rawStack.filter(x => x && typeof x === 'object');
+    else if (rawStack && typeof rawStack === 'object') {
+      rows = Object.keys(rawStack).map(k => {
+        const v = rawStack[k];
+        return (v && typeof v === 'object')
+          ? { layer: k, choice: v.choice || '', rationale: v.rationale || '' }
+          : { layer: k, choice: String(v == null ? '' : v), rationale: '' };
+      });
+    }
+    const body = rows.map(x => `<tr><td>${esc(x.layer || '')}</td><td><b>${esc(x.choice || '')}</b></td><td>${esc(x.rationale || '')}</td></tr>`).join('');
+    if (!body) {
+      return `<div class="hs-t" style="margin:14px 0 6px">${esc(heading)}</div>
+        <div class="errbox">${ic('warn')}<span>The analyze step wrote no <code>tech_stack</code>,
+          so there is nothing to show. Open <b>Edit plan JSON</b> to check what it produced,
+          or go back and re-analyze.</span></div>`;
+    }
+    return `<div class="hs-t" style="margin:14px 0 6px">${esc(heading)}
+        <span class="seccount">${rows.length} layer${rows.length > 1 ? 's' : ''}</span></div>
+      <div class="tbl-wrap"><table class="ptbl"><thead><tr><th>Layer</th><th>Choice</th><th>Rationale</th></tr></thead><tbody>${body}</tbody></table></div>`;
+  }
+
   function viewProposalReview() {
     return `<div class="card">
       <div class="card-head"><div class="hi">${ic('check')}</div><div><h3>Review the proposal plan</h3><div class="sub">Confirm the stack, architecture and diagrams before the (long) generate step.</div></div></div>
@@ -450,13 +659,12 @@ const App = (() => {
     try { plan = await api('GET', '/api/workspaces/' + current + '/plan'); }
     catch (e) { $('#plan-body').innerHTML = `<div class="errbox">${ic('warn')}<span>${esc(e.message)}</span></div>`; return; }
     planCache = plan;
-    const stack = (plan.tech_stack || []).map(s => `<tr><td>${esc(s.layer)}</td><td><b>${esc(s.choice)}</b></td><td>${esc(s.rationale || '')}</td></tr>`).join('');
+    const stackBlock = stackTableHTML(plan, 'Proposed technology stack');
     const dgs = (plan.diagrams || []).map(dd => `<div class="dgram"><div class="dh"><span class="kindtag">${esc(dd.kind || '')}</span><span class="t">${esc(dd.title || dd.slug)}</span></div><div class="rat">${esc(dd.purpose || '')}</div></div>`).join('');
     $('#plan-body').innerHTML = `
       ${plan.summary ? `<div class="summary">${ic('info')}<span>${esc(plan.summary)}</span></div>` : ''}
       ${plan.project ? `<div class="review-count">Project: <b>${esc(plan.project)}</b></div>` : ''}
-      ${stack ? `<div class="hs-t" style="margin:14px 0 6px">Proposed technology stack</div>
-        <div class="tbl-wrap"><table class="ptbl"><thead><tr><th>Layer</th><th>Choice</th><th>Rationale</th></tr></thead><tbody>${stack}</tbody></table></div>` : ''}
+      ${stackBlock}
       ${plan.architecture ? `<div class="hs-t" style="margin:16px 0 6px">Architecture</div><div class="rat" style="white-space:pre-wrap">${esc(plan.architecture)}</div>` : ''}
       ${dgs ? `<div class="hs-t" style="margin:16px 0 8px">${(plan.diagrams || []).length} diagram(s) in the proposal</div>${dgs}` : ''}
       ${sectionPicker(plan)}
@@ -547,6 +755,7 @@ const App = (() => {
           <a class="btn primary lg" href="${base}${esc(v.docx)}" download>${ic('download')} Download .docx</a></div>
         ${v.report ? `<details class="spec-edit"><summary>${ic('chevron')} Run report</summary><div class="log" style="margin-top:10px"><pre>${esc(v.report)}</pre></div></details>` : ''}
         ${dgs ? `<div class="hs-t" style="margin:18px 0 8px">Diagrams in this proposal</div><div class="grid">${dgs}</div>` : ''}
+        <div id="pp-stack">${planCache ? stackTableHTML(planCache, 'Technology stack in this proposal') + (planCache.architecture ? `<div class="hs-t" style="margin:16px 0 6px">Architecture</div><div class="rat" style="white-space:pre-wrap">${esc(planCache.architecture)}</div>` : '') : `<button class="btn ghost sm" onclick="App.showStack()">${ic('code')} Show the technology stack</button>`}</div>
       </div>
       <div class="card-foot">
         <button class="btn ghost" onclick="App.backToInputs()">${ic('edit')} Edit inputs</button>
@@ -608,7 +817,7 @@ const App = (() => {
         <div class="vt"><span class="vdot ${cls}"></span>v${v.id}${cur ? ' <span class="vnow">latest</span>' : ''}${v.label ? ` · ${esc(v.label)}` : ''}</div>
         <div class="vm">${esc(shortTime(v.created))} · ${esc(v.source || '')}</div></div>`;
     }).join('');
-    const cmpBtn = detail.type === 'proposal' ? ''   // compare grid is diagram-specific
+    const cmpBtn = detail.type !== 'diagram' ? ''   // compare grid is diagram-specific
       : `<button class="btn sm ${cmpMode ? 'primary' : ''}" onclick="App.toggleCompare()">${ic('grid')} ${cmpMode ? 'Exit compare' : 'Compare'}</button>`;
     return `<div class="vbar"><div class="vscroll">${chips}</div>${cmpBtn}</div>`;
   }
@@ -748,5 +957,6 @@ const App = (() => {
   return { newWorkspace, saveAndRefine, generate, exportZip, del, zoom, rmFile,
            saveManifest, backToInputs, pickFiles, pickFolder, browseFolder,
            viewVersion, toggleCompare, setCmp, iterateFrom, openHistory, closeHistory, openHelp,
-           savePlan, reopenPlan, stop, rename, toggleSection };
+           savePlan, reopenPlan, saveWbsPlan, reopenWbsPlan, showStack, stop, rename,
+           toggleSection };
 })();
