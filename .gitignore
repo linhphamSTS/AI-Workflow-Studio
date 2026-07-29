@@ -2,3 +2,8 @@
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Backup copies of templates. Git already holds every prior version, so a .bak
+# alongside the file it shadows is a second source of truth that goes stale.
+*.bak
+*.bak_*
