@@ -140,8 +140,13 @@ accurate — the intelligence is in the enforced rules, not in re-reading the lo
 ├─ diagram/              # /linhpham-diagram skill + tools
 ├─ wbs-estimate/         # /linhpham-wbs skill + tools
 ├─ webapp/               # "AI Workflow Studio" — shared local web app over the skills
-└─ tools/                # repo-wide gates (check_skill_parity.py)
+└─ tools/                # repo-wide: the parity gate, the installer test, the icon source
 ```
+
+`get.ps1` / `get.sh` at the root are the one-command installers above. `tools/test_install.ps1`
+exercises one end to end inside a throwaway HOME and a throwaway Claude profile, then proves
+the real profiles were left alone; `tools/make_icon.py` regenerates the Desktop icon from the
+app's brand mark, deterministically, so the committed `.ico` is not an opaque binary.
 
 Each skill folder keeps its own `deploy.*`, `.gitignore`, and `LESSONS_LEARNED.md`,
 so the skills stay fully independent inside one repository.
