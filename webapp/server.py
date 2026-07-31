@@ -66,6 +66,13 @@ WORKSPACES_DIR.mkdir(parents=True, exist_ok=True)
 CLAUDE = shutil.which("claude") or "claude"
 REFINE_MODEL = os.environ.get("DIAGRAM_REFINE_MODEL", "").strip()
 REFINE_TIMEOUT = int(os.environ.get("DIAGRAM_REFINE_TIMEOUT", "900"))   # seconds
+# Folder mode is a different job from text mode wearing the same name. Text mode refines one
+# sentence and lands in about two minutes; folder mode ingests an entire document set, decides
+# which diagrams the project needs and writes a full spec for each, which is the same shape of
+# work as a proposal analyse and gets a comparable budget. A real run with an RFP and a WBS
+# reached "writing the manifest" at 836s and was killed at 900 with nothing saved, so the text
+# budget silently threw away fifteen minutes of work at the last step.
+FOLDER_REFINE_TIMEOUT = int(os.environ.get("DIAGRAM_FOLDER_REFINE_TIMEOUT", "1800"))  # 30 min
 DIAGRAM_SELFLEARN = os.environ.get("DIAGRAM_SELFLEARN", "1") == "1"     # skill self-learns after a web render
 DIAGRAM_SELFLEARN_TIMEOUT = int(os.environ.get("DIAGRAM_SELFLEARN_TIMEOUT", "600"))
 PROPOSAL_ANALYZE_TIMEOUT = int(os.environ.get("PROPOSAL_ANALYZE_TIMEOUT", "1200"))    # 20 min
@@ -212,6 +219,53 @@ def slugify(s: str) -> str:
     return s or "diagram"
 
 
+def _blocker_slugs(check: dict) -> list[str]:
+    """Name the diagrams that blocked, and the check that fired, so the message is actionable."""
+    out = []
+    for d in check.get("diagrams", []):
+        codes = sorted({i.get("code", "?") for i in d.get("issues", [])
+                        if i.get("severity") == "blocker"})
+        if codes:
+            out.append(f"{d.get('slug', '?')} ({', '.join(codes)})")
+    return out or [f"{check.get('blockers', 0)} unattributed"]
+
+
+def _clean_prose(value):
+    """Strip the dash characters the deliverable bans, recursively.
+
+    A spaced em-dash reads as machine-written and the reviewer treats it as a blocker, but
+    a head-less run has nobody to send it back to, so the text is corrected on the way out
+    instead of failing a render that is otherwise fine. The first separator becomes a colon
+    (the caption convention is '<Type>: <Scope>'); any further one becomes a comma, because
+    a second colon in one line reads worse than the dash did.
+
+    It recurses because captions are strings, explanation bullets are a list of strings and
+    a descriptor is a dict of both: a pass that walks only the top level leaves most of the
+    text untouched, which is how this class of fix has failed before.
+    """
+    if isinstance(value, str):
+        if "—" not in value and "–" not in value:
+            return value
+        # A line that already carries a colon does not want a second one, so there the dash
+        # becomes a comma instead. Without this, "**Identity**: one account — consent" came
+        # out with two colons, which is the thing the docstring above says to avoid.
+        first = ": " if ":" not in value else ", "
+        seen = False
+
+        def _sub(_m):
+            nonlocal seen
+            r = ", " if seen else first
+            seen = True
+            return r
+
+        return re.sub(r"\s*[—–]\s*", _sub, value)
+    if isinstance(value, list):
+        return [_clean_prose(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _clean_prose(v) for k, v in value.items()}
+    return value
+
+
 # --------------------------------------------------------------------------- ingest
 def run_ingest(ws_id: str, source_dir: Path) -> Path | None:
     """Build spec/_ingest_digest.md from a folder of docs. Returns digest path or None.
@@ -251,6 +305,7 @@ def build_refine_prompt(ws_id: str, meta: dict) -> str:
 
 
 def refine_job(ws_id: str):
+    budget = REFINE_TIMEOUT   # raised below once we know whether this run reads documents
     try:
         meta = read_meta(ws_id)
         d = WORKSPACES_DIR / ws_id
@@ -279,10 +334,14 @@ def refine_job(ws_id: str):
         # 3) run the skill head-less
         prompt = build_refine_prompt(ws_id, meta)
         (d / "spec" / "_refine_prompt.md").write_text(prompt, encoding="utf-8")
-        job_log(ws_id, "  [usually 3-5 minutes: reads the KB, designs the spec]")
+        folder_mode = bool(sources)
+        budget = FOLDER_REFINE_TIMEOUT if folder_mode else REFINE_TIMEOUT
+        job_log(ws_id, "  [reads the documents, picks the diagram set and designs each spec: "
+                       "usually 8-15 minutes]" if folder_mode else
+                       "  [usually 3-5 minutes: reads the KB, designs the spec]")
         # Same streamed + cancellable runner as the proposal phases, so every LLM step
         # in the app reports progress live and can be stopped from the UI.
-        _run_claude(ws_id, prompt, REFINE_TIMEOUT, "refine", add_dirs=[SKILL_DIR])
+        _run_claude(ws_id, prompt, budget, "refine", add_dirs=[SKILL_DIR])
 
         # 4) verify the manifest exists + parses
         if not manifest.exists():
@@ -295,8 +354,10 @@ def refine_job(ws_id: str):
         set_status(ws_id, "refined", error="", n_diagrams=n)
         job_log(ws_id, f"OK refine -> {n} diagram(s)")
     except subprocess.TimeoutExpired:
-        set_status(ws_id, "error", error=f"refine timed out after {REFINE_TIMEOUT}s")
-        job_log(ws_id, "! refine timed out")
+        env = "DIAGRAM_FOLDER_REFINE_TIMEOUT" if budget == FOLDER_REFINE_TIMEOUT else "DIAGRAM_REFINE_TIMEOUT"
+        set_status(ws_id, "error",
+                   error=f"refine timed out after {budget}s (raise {env} and run it again)")
+        job_log(ws_id, f"! refine timed out after {budget}s")
     except Exception as e:  # noqa: BLE001
         _finish_job(ws_id, "refine", e)
     finally:
@@ -912,9 +973,14 @@ def generate_job(ws_id: str):
                 entry["error"] = f"unknown kind '{kind}'"
                 results.append(entry); continue
 
-            spec = dg.get("spec") or {}
+            # Scrub the SPEC too, not just the descriptor. Scrubbing only the descriptor left
+            # 31 em-dashes drawn into the pictures themselves, so a figure titled
+            # "AI Platform — Shared Model Gateway" sat under a caption reading
+            # "AI Reference Architecture: one shared model gateway": the same rule applied to
+            # the words under the image and not to the words inside it.
+            spec = _clean_prose(dg.get("spec") or {})
             spec.setdefault("slug", slug)
-            spec.setdefault("title", title)
+            spec.setdefault("title", _clean_prose(title))
             spec_path = out / f"{slug}.spec.json"
             spec_path.write_text(json.dumps(spec, indent=2, ensure_ascii=False), encoding="utf-8")
             png_path = out / f"{slug}.png"
@@ -932,7 +998,7 @@ def generate_job(ws_id: str):
                     entry[ext.lstrip(".")] = f"{slug}{ext}"
 
             # per-diagram .docx from the descriptor
-            desc = dg.get("descriptor") or {}
+            desc = _clean_prose(dg.get("descriptor") or {})
             desc.setdefault("slug", slug)
             desc.setdefault("subheading", dg.get("title") or slug)
             dj_entries.append({**desc, "slug": slug, "png": png_path.name})
@@ -989,7 +1055,17 @@ def generate_job(ws_id: str):
         meta["check"] = chk
         meta["status"] = "generated"
         n_ok = sum(1 for r in results if r["ok"])
-        meta["error"] = "" if n_ok == len(results) else f"{len(results)-n_ok} diagram(s) failed to render"
+        # A blocker used to leave error empty, so a run that produced a figure with an edge
+        # label sitting on top of a node label reported exactly like a clean one. The files
+        # are still delivered, because they are worth iterating on, but the defect has to be
+        # stated: a self-check nobody is told about is a self-check nobody acts on.
+        problems = []
+        if n_ok != len(results):
+            problems.append(f"{len(results)-n_ok} diagram(s) failed to render")
+        if check.get("blockers"):
+            problems.append(f"{check['blockers']} self-check blocker(s): "
+                            + ", ".join(_blocker_slugs(check)) + ". Fix the spec and regenerate")
+        meta["error"] = "; ".join(problems)
         write_meta(ws_id, meta)
         job_log(ws_id, f"OK generate v{vid} -> {n_ok}/{len(results)} rendered, "
                        f"{check.get('blockers',0)} blocker(s)")

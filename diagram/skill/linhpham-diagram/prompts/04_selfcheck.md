@@ -53,11 +53,27 @@ Open the rendered PNG and judge it against the 20-year-SA rubric. Every item mus
 - **No edge label overlaps a node label or another label.** A same-column (stacked) edge label
   belongs in the clear side gutter, never on the centred node label beneath the icon.
 - Labels wrapped cleanly (no dangling "("); no overlapping nodes/edges; balanced whitespace.
-- Caption reads `<Type> — <Scope>`.
+- Caption reads `<Type>: <Scope>` — a COLON, never an em-dash (`diagram_check` warns
+  `caption_em_dash`; em-dashes in delivered text read as machine-written).
 
 Crop the densest region — and specifically crop each boundary header and every edge label — then
 `Read` the crop to confirm nothing overflows a border or overlaps. The automated lint (§1) catches
-these for `build_cloud` diagrams, but confirm visually for Graphviz/sequence diagrams too. **If any item fails, fix the
+these for `build_cloud` diagrams, but confirm visually for Graphviz/sequence diagrams too.
+
+**Know what the automation does NOT cover, and check those by eye:**
+- **Graphviz / sequence diagrams have NO render-time lint** — it lives in `build_cloud` alone, so a
+  text defect there ships with a clean `diagram_check`. On every Graphviz diagram, crop **each cluster
+  header**: the header is centred across the top of the box, which is the corridor inbound edges use to
+  reach the cluster's first node, so a multi-line header gets sliced by those arrowheads. A short
+  one-line cluster label is the fix (requirement IDs / CIDRs go in the bullet).
+- **`label_line_long` means two different things.** On a boundary / wrap / shared-band cell it is
+  benign (draw.io wraps that text inside the box). On a NODE cell — an image cell with no
+  `whiteSpace=wrap` — it is real: that label draws as one long line and crosses its container in the
+  `.drawio`, even though the PNG wraps it correctly. Triage by cell type; a page of the benign kind is
+  exactly what hides the real ones.
+- **Text drawn into the image is delivered text.** Check the `title` and every node / boundary / edge
+  label for an em-dash: the caption gate reads only the descriptor, so a dash in a label ships in the
+  picture and contradicts the colon-form caption printed beneath it. **If any item fails, fix the
 spec/script and re-render — do not rationalise a mediocre diagram.** Ask yourself literally: *would a
 principal SA put this in front of a paying client?* If not, redo it.
 

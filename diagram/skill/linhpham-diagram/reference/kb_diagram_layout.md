@@ -41,6 +41,35 @@ the cell + box padding, not on the centred node label. Adjacent/skip edge labels
 nudge off the line (they already sit in a gutter). Both are enforced by the renderer's layout lint
 (`header_overflow` / `label_overlap` → `<slug>.lint.json` → a `diagram_check` blocker).
 
+**A label needs a gutter to be offset INTO — so two placements must be avoided in the SPEC itself:**
+1. **A labelled same-column (stacked) edge in the outermost (first/last) column.** There is no gutter
+   beyond the outer column, so the offset pushes the text past the canvas edge and it is **clipped off
+   the image** — and the lint misses it, because it tests label↔label overlap, not canvas bounds. Put
+   the pair in adjacent columns, or leave the edge unlabelled (a stacked pair inside one tier already
+   reads as "feeds").
+2. **A long label on a cross-ROW edge between adjacent columns.** Its vertical leg runs past the target
+   column's other rows, so the label lands on whatever node occupies the crossed row band. Keep such
+   labels ≤ ~14 chars, or align the two endpoints on the same row, and put the detail in the bullet.
+3. **A long NODE label.** The label is the component NAME; every qualifier belongs in `tech` / `tags` /
+   `subtitle`, never in `Name — qualifier` form. The PNG wraps it to at most **3 lines and drops the
+   rest with no ellipsis** (a 56-char label already fills all three), and the **`.drawio` does not wrap
+   it at all** — a node is a `shape=image` cell without `whiteSpace=wrap`, so the label draws as one
+   long line and crosses its subnet/tier box while the PNG of the same spec looks correct. Keep node
+   labels to ~24 chars and the two formats agree.
+
+**Reading `label_line_long` from `diagram_check`:** it fires per `.drawio` cell, and the same code means
+two different things. On a boundary / wrap / shared-band cell (`rounded=1;whiteSpace=wrap`) it is
+**benign** — draw.io wraps that text inside the box. On a NODE cell (an image cell, no `whiteSpace=wrap`)
+it is **real** — that label will cross its container. A run full of the benign kind is what hides the
+real ones, so triage by cell type instead of dismissing the code.
+
+**The layout lint is `build_cloud`-only.** `build_graph` (Graphviz) and `build_sequence` (PIL) have no
+render-time bbox self-check, so on those paths a text defect ships with a clean `diagram_check`. The
+one that recurs there: an **inbound edge slicing through a cluster's header**. A Graphviz cluster label
+is centred across the top of the box (`labelloc=t`), which is the corridor every inbound arrow uses to
+reach the cluster's first node — so keep cluster labels to one short line (≤ ~28 chars; requirement IDs
+and CIDRs go in the bullet), and crop each header to confirm.
+
 ## Auto-generated vs professional — the tells
 | Amateur | Professional |
 |---|---|
@@ -48,6 +77,10 @@ nudge off the line (they already sit in a gutter). Both are enforced by the rend
 | Skip edge cuts straight across an intervening tier's icons | Tier-crossing edge routes around via a clear gutter + bus lane |
 | Header text spills past the box border | Box widened (or header wrapped) so the title fits inside |
 | Edge label printed on top of a node's label | Edge label offset into the clear gutter, clear of all text |
+| Edge label half-cut by the canvas edge (stacked edge labelled in the outer column) | Labelled stacked edges kept out of the first/last column, so the label has a real gutter |
+| Inbound arrow slicing through a cluster's centred multi-line header | One short cluster label, clear of the arrows' entry corridor |
+| Node label wrapped neatly in the PNG but one wide line crossing its box in the `.drawio` | Node label short enough to need no wrap (qualifier in `tech`), so PNG and `.drawio` agree |
+| An em-dash drawn inside the picture while the caption below it uses a colon | One separator convention (colon) in the labels, the title, the caption and the bullets |
 | Dashed edge from compute to every shared service | Shared services = band/badge, 0–1 edges |
 | Large boundary box mostly empty | Box shrink-wrapped to contents |
 | Icons at irregular positions, uneven gaps | Strict grid, aligned tiers, even gaps |

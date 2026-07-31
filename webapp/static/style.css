@@ -79,7 +79,13 @@ svg{display:block}
 .ws-item.active{border-color:transparent;background:var(--grad-soft);box-shadow:0 0 0 1.5px var(--brand-1) inset}
 .ws-item.active::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--grad)}
 .ws-item .n{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.01em}
-.ws-item .meta{display:flex;gap:8px;align-items:center;margin-top:7px;font-size:11px;color:var(--faint)}
+/* Three items on one non-wrapping line do not fit a sidebar this narrow once the type badge
+   reads "TECHNICAL PROPOSAL", so the last one overflowed the card and broke mid-number: a
+   count of 10 rendered as "1" with the "0" clipped. Wrapping the row keeps every item whole,
+   and the count carries its own unit because a bare "· 8" tells the reader nothing. */
+.ws-item .meta{display:flex;gap:8px;align-items:center;margin-top:7px;font-size:11px;color:var(--faint);
+  flex-wrap:wrap;row-gap:6px}
+.ws-item .meta .cnt{white-space:nowrap}
 .side-empty{color:var(--faint);font-size:12.5px;text-align:center;padding:24px 10px;line-height:1.6}
 .side-foot{font-size:11px;color:var(--faint);line-height:1.6;border-top:1px solid var(--line);padding-top:12px}
 .side-foot .sf-line{display:flex;align-items:center;gap:6px}
@@ -343,18 +349,27 @@ details.spec-edit[open] summary .icon{transform:rotate(90deg)}
 /* custom modal (replaces browser alert/confirm/prompt) */
 .modal-ov{position:fixed;inset:0;background:rgba(8,10,15,.55);backdrop-filter:blur(3px);display:flex;
   align-items:center;justify-content:center;z-index:100;padding:20px;animation:fade .14s ease}
+/* The overlay centres the dialog, so a dialog taller than the screen overflows BOTH ends and
+   neither end can be scrolled to: the title goes off the top and the confirm button off the
+   bottom, unreachable. It surfaced when picking "WBS + Cost", which reveals a second question
+   and makes this modal the tallest one. Capping the height and scrolling only the body keeps
+   the header and the buttons on screen whatever a modal grows into later. */
 .modal{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--sh-lg);
-  width:100%;max-width:440px;overflow:hidden;animation:pop .17s cubic-bezier(.2,.9,.3,1.2)}
+  width:100%;max-width:440px;overflow:hidden;animation:pop .17s cubic-bezier(.2,.9,.3,1.2);
+  max-height:calc(100vh - 40px);display:flex;flex-direction:column}
 @keyframes pop{from{opacity:0;transform:translateY(12px) scale(.97)}to{opacity:1;transform:none}}
-.modal-head{display:flex;align-items:center;gap:12px;padding:20px 22px 6px}
+.modal-head{display:flex;align-items:center;gap:12px;padding:20px 22px 6px;flex:none}
 .modal-head .mi{width:38px;height:38px;border-radius:11px;background:var(--grad-soft);color:var(--brand-1);
   display:flex;align-items:center;justify-content:center;flex:none}
 .modal-head.danger .mi{background:var(--bad-bg);color:var(--bad)}
 .modal-head .mi .icon{width:20px;height:20px}
 .modal-head h3{margin:0;font-size:16.5px;font-weight:700;letter-spacing:-.02em}
-.modal-body{padding:8px 22px 6px;color:var(--muted);font-size:13.5px;line-height:1.6}
+/* min-height:0 is what actually lets a flex child shrink and scroll; without it the body
+   keeps its full content height and the cap above does nothing. */
+.modal-body{padding:8px 22px 6px;color:var(--muted);font-size:13.5px;line-height:1.6;
+  overflow-y:auto;min-height:0}
 .modal-body input[type=text]{margin-top:14px}
-.modal-foot{display:flex;gap:10px;justify-content:flex-end;padding:18px 22px 20px}
+.modal-foot{display:flex;gap:10px;justify-content:flex-end;padding:18px 22px 20px;flex:none}
 .btn.danger-solid{background:var(--bad);border-color:transparent;color:#fff}
 .btn.danger-solid:hover{filter:brightness(1.06);box-shadow:0 6px 18px rgba(225,29,72,.35)}
 

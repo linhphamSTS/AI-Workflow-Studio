@@ -42,6 +42,7 @@ EMBED_DPI_MIN = 220          # below this at the 6.5in Word embed = visibly blur
 EMBED_DPI_TARGET = 300       # crisp target; between MIN and this = warn to re-render wider
 MAX_LABEL_LINE = 24          # chars; a single line longer than this is cramped
 MIN_PNG_BYTES = 3000
+MAX_ELEMENTS = 34            # per figure; past this a reader stops parsing and starts scanning
 
 
 class Report:
@@ -117,6 +118,13 @@ def check_png(png: Path) -> list[dict]:
                                  f"{EMBED_DPI_TARGET} DPI crisp target; consider a wider render (>= {target_px}px)"))
     if dpi and dpi[0] and dpi[0] < 200:
         issues.append(_issue("warning", "png_dpi_meta", f"PNG dpi metadata {dpi[0]} < 200"))
+    # SHARP and LEGIBLE are different properties and the checks above only measure the first.
+    # An aspect-ratio rule was tried here as a proxy and removed: measured across the sample
+    # set it fired on seven wide figures while missing the smallest text in the set, because
+    # what decides the size a label lands at is the source font against the image WIDTH, not
+    # the ratio. A 1.2:1 figure came out at 5.5pt and a 1.5:1 one at 3.4pt. Any real check
+    # needs the source font size, which a PNG does not carry; raising it is a renderer change,
+    # not a threshold.
     return issues
 
 
@@ -280,8 +288,12 @@ def check_diagram_block(slug: str, entry: dict | None) -> list[dict]:
         issues.append(_issue("warning", "caption_missing", f"'{slug}' has no caption"))
     elif "—" in caption:
         # Em-dashes are banned in delivered content (they read as machine-written);
-        # the caption convention is "<Type>: <Scope>".
-        issues.append(_issue("warning", "caption_em_dash",
+        # the caption convention is "<Type>: <Scope>". BLOCKER, to match the technical
+        # proposal reviewer, which blocks the same character in the same deliverable. It
+        # was a warning here, so eight of eight captions in one run carried an em-dash and
+        # nothing objected; a rule with two severities is a rule that gets ignored on the
+        # softer side.
+        issues.append(_issue("blocker", "caption_em_dash",
                              f"caption uses an em-dash; write '<Type>: <Scope>': {caption[:60]!r}"))
     elif ":" not in caption and " - " not in caption:
         issues.append(_issue("warning", "caption_format",
@@ -315,6 +327,31 @@ def check_layout_lint(lint_path: Path) -> list[dict]:
     return out
 
 
+def check_spec_density(spec_path: Path) -> list[dict]:
+    """Warn when a figure carries more elements than a reader will parse.
+
+    Past roughly three dozen boxes a reader stops reading the diagram and starts scanning it,
+    and the figure has to do the explaining that the bullets underneath should be doing. It is
+    a warning rather than a blocker because a deliberately dense reference architecture is a
+    legitimate choice; it just has to be a choice.
+
+    Counted from the spec rather than the image because a spec says what the elements ARE,
+    whatever shape the renderer gives them.
+    """
+    if not spec_path.exists():
+        return []
+    try:
+        blob = spec_path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    n = len(re.findall(r'"(?:id|node|name)"\s*:', blob))
+    if n > MAX_ELEMENTS:
+        return [_issue("warning", "figure_crowded",
+                       f"about {n} elements (> {MAX_ELEMENTS}) — a reader scans rather than reads at "
+                       f"this density; split the figure or move detail into the explanation bullets")]
+    return []
+
+
 def run(dir_path: Path) -> Report:
     rep = Report()
     inv = {}
@@ -334,6 +371,7 @@ def run(dir_path: Path) -> Report:
         issues += check_explanation_consistency(png.with_suffix(".drawio"), inv.get(slug))
         issues += check_diagram_block(slug, inv.get(slug))
         issues += check_layout_lint(png.with_suffix(".lint.json"))
+        issues += check_spec_density(dir_path / f"{slug}.spec.json")
         rep.add(slug, issues)
     return rep
 

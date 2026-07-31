@@ -13,13 +13,13 @@
 - **Edges** dark slate-grey; solid vs dashed = sync vs async. Sequence diagrams use **numbered step labels** ("1 trip request", "2 GEO RADIUS", ...).
 - **Data-classification tags** in node labels + bullet headers: `[SoR]`, `[PII]`, `[PCI]`.
 - **Title** centred, dark-navy, top of canvas.
-- **Caption format = `<Type> — <Scope>`** with an em-dash, where `<Scope>` is THIS project's subject (e.g. `System Context Diagram — <the system being proposed>`, `CI/CD Pipeline — Commit to Production`). No "Figure N:" in the stored caption; numbering is prepended at doc-assembly time.
+- **Caption format = `<Type>: <Scope>`** with a **COLON — never an em-dash** (`diagram_check.check_diagram_block` warns `caption_em_dash` on any `—` in a caption, and an em-dash reads as machine-written), where `<Scope>` is THIS project's subject (`System Context Diagram: <the system being proposed>`, `CI/CD Pipeline: Commit to Production`). No "Figure N:" in the stored caption; numbering is prepended at doc-assembly time.
 
 ## The `diagrams.json` metadata contract (reuse this shape)
 
 Each entry: `slug`, `subheading`, `target_heading`, `png` (path), `caption`, `intro_paragraph`, `explanation_bullets[]`.
 - **`intro_paragraph`** = 2–4 sentences framing what the view shows and why (altitude/purpose), no bullets.
-- **`explanation_bullets`** = `**Component** — one-sentence description` (bold name, em-dash, rationale). Sequence diagrams use `**Step — <label>** — description`. Bullets map 1:1 to nodes/clusters in the image (orphan bullets are flagged).
+- **`explanation_bullets`** = `**Component**: one-sentence description` (bold name, **colon**, rationale — the same no-em-dash rule as the caption; `build_diagram_doc._split_markdown_bullet` accepts the colon). Sequence diagrams use `**Step <n>, <label>**: description`. Bullets map 1:1 to nodes/clusters in the image (orphan bullets are flagged).
 
 ## Suggestion catalog — recurring diagram types worth offering the user
 

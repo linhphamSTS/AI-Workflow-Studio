@@ -146,7 +146,8 @@ const App = (() => {
       const tb = `<span class="tbadge ${T(w.type).badge}">${T(w.type).label}</span>`;
       const node = el(`<div class="ws-item ${w.id === current ? 'active' : ''}" data-id="${w.id}">
         <div class="n">${esc(w.name)}</div>
-        <div class="meta">${tb}<span class="pill ${w.status}">${w.status}</span>${w.n_diagrams ? `<span>· ${w.n_diagrams}</span>` : ''}</div></div>`);
+        <div class="meta">${tb}<span class="pill ${w.status}">${w.status}</span>${w.n_diagrams
+          ? `<span class="cnt">${w.n_diagrams} figure${w.n_diagrams > 1 ? 's' : ''}</span>` : ''}</div></div>`);
       node.onclick = () => select(w.id);
       box.appendChild(node);
     });

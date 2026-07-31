@@ -52,10 +52,18 @@ def _icon_human(ref: str) -> str:
 
 
 def _caption(dtype: str, title: str) -> str:
-    """A proposal caption reads '<Type> — <Scope>'. Most titles already do; if a
-    title has no dash, prefix the diagram type."""
+    """A caption reads '<Type>: <Scope>'.
+
+    This used to insert an em-dash, which contradicted the rule stated at the top of this
+    module and made the builder itself the source of the character the reviewer rejects.
+    Any dash a caller supplies as the type separator is converted, so a title written to
+    the old convention still comes out right.
+    """
     t = (title or dtype).strip()
-    return t if ("—" in t or " - " in t) else f"{dtype} — {t}"
+    for dash in (" — ", " – ", " - "):
+        if dash in t:
+            return t.replace(dash, ": ", 1)
+    return t if ":" in t else f"{dtype}: {t}"
 
 
 def _cloud_type(spec, slug):

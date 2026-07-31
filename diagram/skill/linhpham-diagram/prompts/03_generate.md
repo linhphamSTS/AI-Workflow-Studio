@@ -23,6 +23,16 @@ edge `kind` were set per the type's KB. Pick the engine in the spec: `dot` (defa
 flow), `twopi` (mind map / radial), `neato` (relationship map), `circo` (ring). Set `direction` LR
 for pipelines/flows, TB for hierarchies/layered.
 
+**A cluster label sits in the arrows' ENTRY CORRIDOR — keep it SHORT (≤ ~28 chars, one line).** A
+Graphviz cluster header is centred across the TOP of the box (`labelloc=t`), which is exactly where
+every inbound edge crosses on its way to the cluster's first node, so a two- or three-line header
+gets SLICED by those arrowheads (observed: two inbound edges cut through
+"Perimeter and identity (SEC-01, SEC-04, SEC-05)", and a third cut the last line of
+"Data plane — UAE region only, residency enforced by policy-as-code (SEC-03)"). Name the zone and
+nothing else — requirement IDs, CIDRs and rationale belong in the explanation bullet. Nothing catches
+this automatically: the render-time layout lint exists for `build_cloud` only, so crop each cluster
+header and `Read` it (Phase 4 §2).
+
 ### B. sequence  (time-ordered interactions)
 ```bash
 python scripts/build_sequence.py --spec output/diagrams/<slug>.spec.json --out output/diagrams/<slug>.png
@@ -63,6 +73,33 @@ the real architecture-center house style, not a hand-drawn box):**
     so the band is visibly LINKED, not orphaned. The engine draws a single dashed connector from that
     compute node down to the band. NEVER add one edge per band icon — that fan-out is the spider-web.
     "Connects to everything ⇒ one representative line + position implies scope."
+
+**Edge-label placement is a SPEC decision, not just a renderer job** (the renderer offsets a label into
+the nearest clear gutter — you have to give it a gutter to use):
+- **Never label a same-column (stacked) edge in the FIRST or LAST column.** Its label is pushed into the
+  side gutter, and outside the outermost column there is no gutter — the text renders past the canvas
+  edge and is CLIPPED off the image (observed: `curated knowledge → pgvector` "chunk + embed" in a
+  last-column Grounding-stores tier came out as "chunk + embec"). Either put the two nodes in **adjacent
+  columns**, or leave that edge **unlabelled** (a stacked pair inside one tier already reads as
+  "feeds"), or move the tier inward. The layout lint does NOT catch this — it only tests label↔label
+  overlap, not canvas bounds — so it will ship silently.
+- **Keep a CROSS-ROW edge label short (≤ ~14 chars) or align the endpoints on the same row.** An edge
+  between adjacent columns whose endpoints are in *different rows* runs its vertical leg past the other
+  rows of the target column, and a long label there lands on an intervening node's label (observed:
+  `orchestration → second provider` "failover / portability" printed over "Document Intelligence" =
+  a `label_overlap` BLOCKER). Put the detail in the explanation bullet, not on the arrow.
+
+**A node `label` is the component NAME only — every qualifier goes in `tech` / `tags` / `subtitle`.**
+Keep it to ~24 chars (one line at `CELL_W`) and never write `Name — qualifier`:
+- the PNG wraps a node label to at most **3 lines and silently DROPS the rest** (`_wrap` returns
+  `lines[:3]`, no ellipsis) — a 56-char label already fills all three, so one more word disappears
+  with nothing reported;
+- the **`.drawio` does not wrap a node label at all** — it sits on a `shape=image` cell with no
+  `whiteSpace=wrap`, so it renders as ONE long line and CROSSES its subnet/tier box even though the
+  PNG of the same spec looks fine (observed: "Guardrails: moderation, injection defence, PII
+  redaction" ran 23 units past its box). `diagram_check` flags this as `label_line_long`: on a NODE
+  label that warning is REAL, on a boundary / wrap / shared-band label it is benign (those cells DO
+  wrap inside their box in draw.io). Don't dismiss the whole code because most of it is the benign kind.
 
 **ADAPT the scaffold to the PROMPT — never emit a canonical spec verbatim.** The `cloud_specs.py`
 entries exist to hand you the proven LAYOUT (columns, wrap, badges, band, ortho connectors) — the
@@ -132,9 +169,20 @@ Recommended `graph_attr` for a 6.5" embed: `{"fontsize":"18","bgcolor":"white","
 
 ## Write the `diagrams.json` sidecar
 Create/append `output/diagrams/diagrams.json` (a JSON array) with one entry:
-`{slug, subheading, target_heading, png, caption:"<Type> — <Scope>", intro_paragraph (2–4 sentences),
-explanation_bullets:["**Component** — description", ...] }`. One bullet per visible element; a
-sequence uses `**Step — <label>** — description`. No leading numbers/`●` in bullets.
+`{slug, subheading, target_heading, png, caption:"<Type>: <Scope>", intro_paragraph (2–4 sentences),
+explanation_bullets:["**Component**: description", ...] }`. One bullet per visible element; a
+sequence uses `**Step <n>, <label>**: description`. No leading numbers/`●` in bullets.
+**Use a COLON, never an em-dash**, in the caption and in every bullet — `diagram_check` makes an
+em-dash caption a **BLOCKER** (`caption_em_dash`), and it fires on EVERY diagram of a run if you
+template it in.
+
+**The same ban covers every string DRAWN INTO the picture** — the diagram `title`, node / boundary /
+wrap / cluster `label`s, `subtitle`, `tech` and edge labels. Nothing scrubs those: the caption gate
+only reads the descriptor, so an em-dash in a spec label ships inside the image and the figure then
+contradicts its own caption (observed: 31 em-dashes drawn across one 8-diagram run whose captions all
+read with a colon — "AEGI Digital Platform — Azure UAE North Reference Architecture" sitting above
+"Cloud Reference Architecture: the shared platform on Azure UAE North"). Write
+`AKS: namespace per bounded context`, use a comma, or move the qualifier into `tech`.
 
 **Write the `intro_paragraph` and bullets like a Solution Architect with 20 years' experience — they
 must genuinely EXPLAIN THE DESIGN, not fill a template.** The reader should finish the paragraph

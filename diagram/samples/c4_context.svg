@@ -49,8 +49,8 @@
 <!-- sys&#45;&gt;mail -->
 <g id="edge2" class="edge">
 <title>sys&#45;&gt;mail</title>
-<path fill="none" stroke="#8e24aa" stroke-width="1.8" stroke-dasharray="5,2" d="M142.06,-147.21C134.08,-135.53 125.51,-122.79 117.78,-110.92 108.97,-97.37 99.58,-82.35 91.36,-69.02"/>
-<polygon fill="#8e24aa" stroke="#8e24aa" stroke-width="1.8" points="86.76,-61.52 94.92,-67.07 88.31,-63.28 91.81,-68.98 91.47,-69.19 91.13,-69.4 87.63,-63.7 88.02,-71.31 86.76,-61.52"/>
+<path fill="none" stroke="#8e24aa" stroke-width="1.8" stroke-dasharray="5,2" d="M142.66,-147.34C129.94,-128.71 117.78,-110.92 117.78,-110.92 117.78,-110.92 104.66,-89.72 91.93,-69.15"/>
+<polygon fill="#8e24aa" stroke="#8e24aa" stroke-width="1.8" points="87.31,-61.69 95.49,-67.21 88.86,-63.44 92.39,-69.13 92.05,-69.34 91.71,-69.56 88.18,-63.86 88.6,-71.48 87.31,-61.69"/>
 <text text-anchor="middle" x="165.03" y="-100.47" font-family="Segoe UI" font-size="11.00" fill="#8e24aa">sends email [SMTP]</text>
 </g>
 <!-- core -->

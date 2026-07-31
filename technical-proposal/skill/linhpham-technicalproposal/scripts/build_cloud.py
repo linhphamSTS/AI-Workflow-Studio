@@ -140,8 +140,14 @@ def _font(sz, bold=False):
 
 FT = {}
 def _init_fonts():
-    FT["title"] = _font(17 * S, True); FT["node"] = _font(10 * S, True)
-    FT["tech"] = _font(8 * S); FT["hdr"] = _font(9 * S, True); FT["edge"] = _font(8 * S)
+    # Sized against the PAGE, not against the canvas. A figure is embedded at 6.5in wide, so
+    # a label lands at font_px * 72 * 6.5 / image_width points: at the old 10*S a five-column
+    # architecture came out at 3.5pt, which is sharp and unreadable at once. The cell width is
+    # deliberately NOT raised to match, because widening the cell widens the image and the two
+    # cancel out exactly; the cost of bigger text is more wrapping and a taller figure, and
+    # height is the dimension with room to spare.
+    FT["title"] = _font(17 * S, True); FT["node"] = _font(14 * S, True)
+    FT["tech"] = _font(9 * S); FT["hdr"] = _font(10 * S, True); FT["edge"] = _font(9 * S)
 
 def _wrap_multi(draw, text, font, maxw, maxlines=0):
     words = str(text).split(); lines = []; cur = ""
@@ -156,7 +162,20 @@ def _wrap_multi(draw, text, font, maxw, maxlines=0):
     return lines[:maxlines] if maxlines else lines
 
 def _wrap(draw, text, font, maxw):
-    return _wrap_multi(draw, text, font, maxw, 3)
+    """Wrap a node label to at most three lines, and SAY SO when words are dropped.
+
+    This silently returned the first three lines and discarded the rest, so a label one word
+    too long lost that word in the delivered figure with nothing reporting it. Losing text
+    without a trace is the worst defect this renderer can produce, because every check
+    downstream sees a perfectly well-formed picture.
+    """
+    lines = _wrap_multi(draw, text, font, maxw)
+    if len(lines) > 3:
+        _lint_issue("label_truncated",
+                    f"the label {str(text)[:44]!r} needs {len(lines)} lines and only three fit, "
+                    f"so {' '.join(lines[3:])[:40]!r} is dropped from the figure; shorten it or "
+                    f"move the detail into 'tech' / 'tags'")
+    return lines[:3]
 
 def _hdr_offset(has_badge):
     """left inset of a boundary's header text (past the corner category badge)."""
@@ -167,6 +186,12 @@ def _hdr_offset(has_badge):
 # guards all diagrams — not just the samples. Results go to <slug>.lint.json
 # (read by diagram_check.py) and stderr.
 _LINT = {"boxes": [], "issues": []}
+# Canvas width, published once the size is known so an edge label can tell whether the gutter
+# it wants to sit in actually exists. A same-column label in the LAST column was pushed into a
+# right-hand gutter that is off the canvas, and the text was silently cut in half by the image
+# edge; the layout lint saw a box, not a clipped one, so nothing reported it.
+_CANVAS_W = 0
+_DRAWIO_MEASURE = None
 def _lint_reset():
     _LINT["boxes"] = []; _LINT["issues"] = []
 def _lint_box(kind, bbox):
@@ -185,12 +210,48 @@ def _lint_layout():
             if _bbox_overlap(eb, ob, pad=2 * S):
                 _lint_issue("label_overlap", f"an edge label overlaps a {k.replace('label','')} label")
                 break
+    # Text drawn past the canvas is cut by the image edge and reads as a truncated word. The
+    # overlap test above compared labels against each other and never against the page they
+    # are on, so a clipped label passed every check while being unreadable in the delivered
+    # figure. Anything drawn outside the canvas counts, not only edge labels.
+    if _CANVAS_W:
+        for k, b in _LINT["boxes"]:
+            if b[0] < 0 or b[2] > _CANVAS_W:
+                _lint_issue("label_clipped",
+                            f"a {k.replace('label', ' ')} label is drawn past the canvas edge "
+                            f"and will be cut off (x {int(b[0])}..{int(b[2])} of {_CANVAS_W})")
+                break
     seen = set(); uniq = []
     for it in _LINT["issues"]:
         key = (it["code"], it["msg"])
         if key not in seen:
             seen.add(key); uniq.append(it)
     return uniq
+
+def _clear_label_pos(tx, ty, w, hh, vert):
+    """Slide an edge label ALONG its own run until it stops sitting on something.
+
+    The lint reported an overlap and left it there, so the defect had to be fixed by hand in
+    the spec every time, and on a generated run there is nobody to do that. Sliding along the
+    run keeps the label on the line it belongs to, which a perpendicular nudge would not.
+    Returns the original position when nothing is free, so the lint still reports it rather
+    than the label being moved somewhere misleading.
+    """
+    solids = [b for k, b in _LINT["boxes"] if k in ("nodelabel", "header", "icon")]
+    if not solids:
+        return tx, ty
+
+    def box(X, Y):
+        return (X - 3, Y - hh / 2 - 2, X + w + 3, Y + hh / 2 + 2)
+
+    for step in (0, 20 * S, -20 * S, 40 * S, -40 * S, 64 * S, -64 * S):
+        X, Y = (tx, ty + step) if vert else (tx + step, ty)
+        if _CANVAS_W and (X < MARGIN / 2 or X + w + 3 > _CANVAS_W - MARGIN / 2):
+            continue
+        if not any(_bbox_overlap(box(X, Y), ob, pad=2 * S) for ob in solids):
+            return X, Y
+    return tx, ty
+
 
 def _ctext(draw, cx, y, text, font, fill=TXT):
     w = draw.textlength(text, font=font); draw.text((cx - w / 2, y), text, font=font, fill=fill)
@@ -390,6 +451,8 @@ def render(spec: dict, out: Path):
     total_w = int(max(right, x - COL_GAP) + MARGIN)
     total_h = int(bottom + (BAND_GAP + band_h if shared else 0) + MARGIN)
 
+    global _CANVAS_W
+    _CANVAS_W = total_w
     img = Image.new("RGB", (total_w, total_h), "white"); d = ImageDraw.Draw(img)
     if spec.get("title"):
         _ctext(d, total_w / 2, MARGIN, spec["title"], FT["title"], TXT)
@@ -422,6 +485,8 @@ def render(spec: dict, out: Path):
             idx[n["id"]] = n
 
     _plan_edges(spec, idx, col_index)     # fan out shared node sides + stagger gutters (all edges)
+    for n in idx.values():                # register node boxes so edge labels can dodge them
+        _measure_node(d, n)
     for e in spec.get("edges", []):
         a = idx.get(e["from"]); b = idx.get(e["to"])
         if a and b:
@@ -460,6 +525,8 @@ def _emit_drawio(spec, cols, wraps, shared, idx, out):
     editable in diagrams.net."""
     SD = 2.2  # px -> drawio units
     sc = lambda v: int(v / SD)
+    global _DRAWIO_MEASURE
+    _DRAWIO_MEASURE = ImageDraw.Draw(Image.new("RGB", (8, 8)))   # for wrapping labels only
     cells = []; cid = [2]
 
     def add(s):
@@ -513,7 +580,16 @@ def _emit_drawio(spec, cols, wraps, shared, idx, out):
                          f"imageAspect=1;aspect=fixed;image=data:image/png;base64,{b64};")
             else:
                 style = "rounded=1;whiteSpace=wrap;html=1;fillColor=#ECEFF1;strokeColor=#90A4AE;"
-        add(f'<mxCell id="{cid[0]}" value="{escape(n.get("label", nid))}" style="{style}" vertex="1" parent="1">'
+        # Give the label the SAME wrapping the PNG applied. An image cell is only as wide as
+        # its icon and carries no wrap, so a long label that the PNG breaks over three lines
+        # was emitted as one long line and drew straight out of its subnet box: the picture
+        # was right and the editable twin was not. Measured on a real run, 3 of 49 node
+        # labels crossed their container this way.
+        _lines, _ = _node_lines(_DRAWIO_MEASURE, n)
+        value = "&#10;".join(escape(t) for t in _lines) or escape(n.get("label", nid))
+        style += "" if "whiteSpace=wrap" in style else "whiteSpace=wrap;"
+        style += f"labelWidth={sc(CELL_W)};labelPosition=center;align=center;"
+        add(f'<mxCell id="{cid[0]}" value="{value}" style="{style}" vertex="1" parent="1">'
             f'<mxGeometry x="{x}" y="{y}" width="{w}" height="{w}" as="geometry"/></mxCell>')
         ncell[nid] = cid[0] - 1
 
@@ -575,6 +651,26 @@ def _dash_rrect(d, box, r, color, width):
     x0, y0, x1, y1 = box
     for a, b in [((x0 + r, y0), (x1 - r, y0)), ((x1, y0 + r), (x1, y1 - r)), ((x1 - r, y1), (x0 + r, y1)), ((x0, y1 - r), (x0, y0 + r))]:
         _dash(d, a, b, color, width)
+
+def _measure_node(d, n):
+    """Register a node's icon and label boxes WITHOUT drawing them.
+
+    Edges are drawn before nodes so that arrows tuck behind the boxes, which means that when
+    an edge label is positioned nothing has registered a node box yet and it has nothing to
+    avoid. Measuring first is what makes the avoidance possible; the order of drawing stays
+    as it was.
+    """
+    cx, cy = n["_x"], n["_y"]
+    _lint_box("icon", (cx - ICON / 2, cy - ICON / 2, cx + ICON / 2, cy + ICON / 2))
+    lines, extra = _node_lines(d, n)
+    ty = cy + ICON / 2 + LABEL_GAP
+    lbl_top, lbl_w = ty, 0
+    for ln in lines:
+        lbl_w = max(lbl_w, d.textlength(ln, font=FT["node"])); ty += FT["node"].size + 2
+    for _kind, t in extra:
+        lbl_w = max(lbl_w, d.textlength(t, font=FT["tech"])); ty += FT["tech"].size + 3
+    _lint_box("nodelabel", (cx - lbl_w / 2, lbl_top, cx + lbl_w / 2, ty))
+
 
 def _node(img, d, n):
     cx, cy = n["_x"], n["_y"]
@@ -706,9 +802,15 @@ def _edge(d, a, b, e, col_index=None, col_bounds=None, lane_y=None, lane_ix=None
             # clear the whole cell AND the box padding — otherwise it lands on the
             # centred node label or straddles the boundary. It then sits in the clear
             # right-hand gutter. A gutter vertical (adjacent/skip) only needs a nudge.
-            tx = mx + (CELL_W / 2 + COL_PAD + 10 * S if same_col else 6 * S)
+            off = CELL_W / 2 + COL_PAD + 10 * S if same_col else 6 * S
+            tx = mx + off
+            # The right gutter does not exist for the last column, so put the label in the
+            # left one instead of letting the canvas edge cut it in half.
+            if _CANVAS_W and tx + w + 3 > _CANVAS_W - MARGIN / 2:
+                tx = mx - off - w
         else:     # centre on a horizontal run (sits in the gutter between tiers)
             tx = mx - w / 2
+        tx, my = _clear_label_pos(tx, my, w, hh, vert)
         d.rectangle((tx - 3, my - hh / 2 - 2, tx + w + 3, my + hh / 2 + 2), fill="white")
         d.text((tx, my - hh / 2), e["label"], font=FT["edge"], fill=color)
         _lint_box("edgelabel", (tx - 3, my - hh / 2 - 2, tx + w + 3, my + hh / 2 + 2))

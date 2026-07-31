@@ -359,6 +359,125 @@ def ensure_dot() -> str:
     return str(dot)
 
 
+def _lint_layout(engine_bin: str, src: str, out: Path) -> None:
+    """Measure the laid-out graph and record defects an eye would catch but no check did.
+
+    `build_cloud` has had a render-time lint for a while and this path had none, so a
+    Graphviz figure could ship with arrows cutting straight through a cluster header while
+    `diagram_check` reported zero blockers. Zero blockers meant "not measured", not
+    "correct", and every run needed a human to look at the pictures.
+
+    Two defects are worth a blocker here, both confirmed on delivered figures:
+
+      * an edge crossing a CLUSTER LABEL. Graphviz centres a cluster label across the top of
+        the box, which is exactly the corridor every inbound edge travels through, so a
+        two-line or three-line header is all but guaranteed to be sliced.
+      * an edge LABEL landing on a node. The label is placed on the spline midpoint with no
+        awareness of what is already drawn there.
+
+    Geometry comes from `-Tjson` on the same source that produced the PNG, so what is
+    measured is what was drawn. Any failure here is silent: a lint that breaks a render is
+    worse than the defects it looks for.
+    """
+    try:
+        proc = subprocess.run([engine_bin, "-Tjson"], input=src, capture_output=True,
+                              text=True, encoding="utf-8",
+                              creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0))
+        if proc.returncode != 0:
+            return
+        g = json.loads(proc.stdout)
+    except Exception:  # noqa: BLE001
+        return
+
+    def _pt(s):
+        try:
+            x, y = str(s).split(",")[:2]
+            return float(x), float(y)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _box(cx, cy, w, h):
+        return (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
+
+    def _hit(b, x, y):
+        return b[0] <= x <= b[2] and b[1] <= y <= b[3]
+
+    def _samples(pts):
+        """Walk the spline, not just its control points.
+
+        An edge is stored as bezier control points, and a header can sit between two of them
+        with no control point inside it, so testing the stored points alone reports clean on
+        a line that visibly crosses the text. Sampling each segment closes that gap.
+        """
+        out = []
+        for i in range(len(pts) - 1):
+            (x0, y0), (x1, y1) = pts[i][:2], pts[i + 1][:2]
+            for k in range(9):
+                t = k / 8
+                out.append((x0 + (x1 - x0) * t, y0 + (y1 - y0) * t))
+        return out or [tuple(p[:2]) for p in pts]
+
+    # Cluster header boxes, and node boxes, in Graphviz points.
+    headers, nodes = [], []
+    for o in g.get("objects", []):
+        name = o.get("name", "")
+        lp = _pt(o.get("lp"))
+        if str(name).startswith("cluster") and lp:
+            # lwidth / lheight come back in INCHES while lp and bb are in points. Reading
+            # them as points built a label box under two points across, which intersected
+            # nothing and reported every figure clean.
+            lw = float(o.get("lwidth", 0) or 0) * 72
+            lh = float(o.get("lheight", 0) or 0) * 72
+            if lw and lh:
+                headers.append((o.get("label", name), _box(lp[0], lp[1], lw, lh)))
+        pos = _pt(o.get("pos"))
+        if pos and not str(name).startswith("cluster"):
+            w = float(o.get("width", 0) or 0) * 72
+            h = float(o.get("height", 0) or 0) * 72
+            if w and h:
+                nodes.append((o.get("label", name), _box(pos[0], pos[1], w, h)))
+
+    issues = []
+    for e in g.get("edges", []):
+        pts = []
+        for op in e.get("_draw_", []):
+            pts.extend(op.get("points", []) or [])
+        pts = _samples([p for p in pts if len(p) >= 2])
+        for label, hb in headers:
+            if any(_hit(hb, p[0], p[1]) for p in pts):
+                issues.append({"code": "edge_crosses_cluster_label",
+                               "msg": f"an edge is drawn through the cluster header {label!r}; "
+                                      f"shorten it to one short line and move the detail into a bullet"})
+                break
+        elp = _pt(e.get("lp"))
+        if elp and e.get("label"):
+            # The rendered label box is not in the JSON, so approximate it from the text.
+            lw = float(e.get("lwidth", 0) or 0) * 72 or len(str(e["label"])) * 5.0
+            lh = float(e.get("lheight", 0) or 0) * 72 or 14.0
+            lb = _box(elp[0], elp[1], lw, lh)
+            for label, nb in nodes:
+                if not (lb[2] <= nb[0] or nb[2] <= lb[0] or lb[3] <= nb[1] or nb[3] <= lb[1]):
+                    issues.append({"code": "edge_label_on_node",
+                                   "msg": f"the edge label {str(e['label'])[:30]!r} is drawn over the node "
+                                          f"{str(label)[:30]!r}; shorten the label or re-order the nodes"})
+                    break
+
+    # De-duplicate, then write the sidecar ONLY when there is something to say, so a clean
+    # render leaves no file behind and diagram_check has nothing to read.
+    seen, uniq = set(), []
+    for it in issues:
+        key = (it["code"], it["msg"])
+        if key not in seen:
+            seen.add(key); uniq.append(it)
+    lint_path = out.with_suffix(".lint.json")
+    if uniq:
+        lint_path.write_text(json.dumps(uniq, indent=2), encoding="utf-8")
+        for it in uniq:
+            print(f"! [lint] {it['code']}: {it['msg']}")
+    elif lint_path.exists():
+        lint_path.unlink()
+
+
 def render(spec: dict, out: Path, emit_drawio: bool = True) -> Path:
     dot_bin = ensure_dot()
     src = build_dot(spec)
@@ -373,6 +492,7 @@ def render(spec: dict, out: Path, emit_drawio: bool = True) -> Path:
     if proc.returncode != 0:
         raise RuntimeError(f"Graphviz render failed ({engine}):\n{proc.stderr}\n--- DOT ---\n{src}")
     print(f"Rendered {out}")
+    _lint_layout(engine_bin, src, out)
 
     # Sharpness for Word: build_docx.py inserts every figure at width = 6.5in, so the
     # effective DPI is width_px / 6.5. A small graph rendered at dpi=300 can come out

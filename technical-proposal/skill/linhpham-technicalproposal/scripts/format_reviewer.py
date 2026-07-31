@@ -187,27 +187,64 @@ def check_image_sharpness(docx_path: Path, report: Report) -> None:
     worse than not having it. A generated architecture figure is 4,000 px and up, so the
     split is unambiguous: anything under the in-table logo ceiling is a logo, and anything
     the run did not generate is template art.
+
+    The scoping above was described here and never implemented: the code audited every image
+    in the file, so the docstring and the behaviour disagreed and the reader got the 78 flags
+    anyway.
+
+    Measured on a delivered proposal, the two groups separate cleanly on WIDTH, not on the
+    DPI stamp: the in-table logos are 143 px and carry a 220 DPI stamp of their own, so a
+    stamp test alone still flagged all sixty of them. Generated figures are 3,100 px and up
+    at exactly 300 DPI. A full-page template image can also be large and stamped, and will be
+    counted as generated; it is far above the threshold, so it never produces a flag. The
+    counts are reported either way, so a renderer that stops stamping shows up as a figure
+    count that dropped rather than as silence.
     """
     try:
         from PIL import Image
     except ImportError:
         return  # If PIL unavailable in this environment, skip silently
+    LOGO_MAX_W = 320          # in-table technology logos are rendered small on purpose
+    generated = logos = template_art = 0
     with zipfile.ZipFile(docx_path) as z:
         media = [n for n in z.namelist() if n.startswith("word/media/")]
         for m in media:
             try:
-                data = z.read(m)
-                img = Image.open(io.BytesIO(data))
+                img = Image.open(io.BytesIO(z.read(m)))
                 w, _ = img.size
-                if w < 1500:
-                    report.add(Issue(
-                        f"image_low_resolution::{m}", "sharpness", "major", False,
-                        f"Image {m} is only {w}px wide (< 1500 px target)",
-                        detail="Re-render the source diagram at >= 300 DPI",
-                    ))
+                dpi_x = (img.info.get("dpi") or (0, 0))[0]
             except Exception:
                 continue
-    report.pass_("image_sharpness_audited")
+            if w <= LOGO_MAX_W:
+                logos += 1
+                continue
+            # Every renderer here stamps exactly 300, and a PNG stores resolution in pixels
+            # per METRE, so it reads back as 299.9994: an equality test classified all of
+            # them as template art. A loose threshold is no good either, because the
+            # template's own decorative art is stamped at 220 and six of those were then
+            # reported as soft generated figures. 290 sits between the two real values.
+            if img.format != "PNG" or dpi_x < 290:
+                template_art += 1
+                continue
+            generated += 1
+            if w < 1500:
+                report.add(Issue(
+                    f"image_low_resolution::{m}", "sharpness", "major", False,
+                    f"Generated figure {m} is only {w}px wide (< 1500 px target)",
+                    detail="Re-render the source diagram at >= 300 DPI",
+                ))
+    if generated == 0 and (logos or template_art):
+        # A check that inspected nothing must not report success. This fired on its first
+        # run, when a rounding error put every figure in the template bucket and the check
+        # passed while auditing zero of them.
+        report.add(Issue(
+            "image_sharpness_scope", "sharpness", "major", False,
+            "The sharpness check classified none of the images as a generated figure",
+            detail=f"{logos} logo(s) and {template_art} other image(s) were seen. Either the "
+                   f"document embeds no generated figure, or the classifier is stale."))
+    else:
+        report.pass_(f"image_sharpness_audited ({generated} generated figure(s) checked; "
+                     f"{logos} in-table logo(s) and {template_art} template image(s) are not ours to change)")
 
 
 def check_justify_body(docx_path: Path, report: Report) -> None:

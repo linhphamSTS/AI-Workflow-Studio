@@ -57,7 +57,8 @@ notation for that type. This is where a vague request becomes a professional dia
   data stores, edges with labels/protocols), following that type's convention (e.g. flowchart ISO
   shapes; ERD crow's-foot; C4 boundaries; microservices DB-per-service + sync/async; cloud nested
   VPC/VNet + edge-outside + legend + colour hierarchy; sequence lifelines + fragments).
-- Apply the house style from `kb_house_style_catalog.md`: caption `<Type> — <Scope>`, legend for
+- Apply the house style from `kb_house_style_catalog.md`: caption `<Type>: <Scope>` (a colon, never a
+  dash — `diagram_check` warns `caption_em_dash` on every em-dash caption), legend for
   sync/async, `[PII]`/`[PCI]`/`[SoR]` tags where relevant, `**Component**: description` bullets
   (a colon after the bold label, never a dash: a spaced em-dash reads as machine-written and is
   rejected on sight, and the same applies to `e.g.` / `i.e.` / `etc.` anywhere in delivered text).
