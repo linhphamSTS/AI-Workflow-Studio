@@ -362,6 +362,16 @@ details.spec-edit[open] summary .icon{transform:rotate(90deg)}
 .modal-head .mi{width:38px;height:38px;border-radius:11px;background:var(--grad-soft);color:var(--brand-1);
   display:flex;align-items:center;justify-content:center;flex:none}
 .modal-head.danger .mi{background:var(--bad-bg);color:var(--bad)}
+.modal-head .mi.warn{background:var(--warn-bg);color:var(--warn)}
+
+/* A command the user has to paste somewhere else: monospaced, selectable, one line, and
+   scrollable rather than wrapped, because a wrapped shell command invites a broken paste. */
+.cmd-row{display:flex;align-items:center;gap:8px;margin:10px 0 14px}
+.cmd{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;user-select:all;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;
+  color:var(--ink);background:var(--surface-3);border:1px solid var(--line-2);
+  border-radius:var(--r-sm);padding:9px 11px}
+.modal-body p.muted{color:var(--muted);font-size:13px}
 .modal-head .mi .icon{width:20px;height:20px}
 .modal-head h3{margin:0;font-size:16.5px;font-weight:700;letter-spacing:-.02em}
 /* min-height:0 is what actually lets a flex child shrink and scroll; without it the body

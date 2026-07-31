@@ -1138,9 +1138,28 @@ def index():
 
 
 def _claude_health() -> dict:
-    """Is the claude CLI installed AND signed in? The Refine step needs both."""
+    """Is the claude CLI installed AND signed in? The Refine step needs both.
+
+    Carries the platform and the matching install command so the browser can print the
+    exact line to paste. The UI has no way to know which OS the server runs on, and a
+    warning that shows a macOS command to a Windows user is worse than no warning.
+    """
     exe = shutil.which("claude")
-    info = {"claude_installed": bool(exe), "logged_in": False, "email": None}
+    if sys.platform == "win32":
+        install_cmd = "irm https://claude.ai/install.ps1 | iex"
+        install_shell = "Windows PowerShell"
+    else:
+        install_cmd = "curl -fsSL https://claude.ai/install.sh | bash"
+        install_shell = "Terminal"
+    info = {
+        "claude_installed": bool(exe),
+        "logged_in": False,
+        "email": None,
+        "platform": sys.platform,
+        "install_cmd": install_cmd,
+        "install_shell": install_shell,
+        "login_cmd": "claude auth login",
+    }
     if exe:
         try:
             r = subprocess.run([exe, "auth", "status", "--json"], capture_output=True, text=True,

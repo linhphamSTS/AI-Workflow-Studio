@@ -921,25 +921,86 @@ const App = (() => {
     } catch (e) { toast(e.message, true); }
   }
 
-  // check the claude CLI is installed + signed in (Refine needs it); warn if not
+  // check the claude CLI is installed + signed in (every workspace type needs it); warn if not
   let health = null;
-  async function checkHealth() {
+  async function checkHealth({ modal = false } = {}) {
     const bar = $('#authwarn');
-    try { health = await api('GET', '/api/health'); } catch (e) { health = null; return; }
+    try { health = await api('GET', '/api/health'); } catch (e) { health = null; return false; }
+    const ok = health.claude_installed && health.logged_in;
     if (!health.claude_installed) {
-      bar.innerHTML = `${ic('warn')}<span>The <code>claude</code> CLI isn’t installed — the <b>Refine</b> step won’t work. Install Claude Code, then reload. (Generate / Preview / Export still work.)</span>`;
-      bar.classList.remove('hidden');
+      bar.innerHTML = `${ic('warn')}<span>The <code>claude</code> CLI is not installed, so nothing can be analysed or generated. <a href="#" data-a="authhelp">Show me how to fix it</a></span>`;
     } else if (!health.logged_in) {
-      bar.innerHTML = `${ic('warn')}<span>You’re not signed in to <code>claude</code> — <b>Refine</b> will fail. Run <code>claude auth login</code> in a terminal, then reload.</span>`;
-      bar.classList.remove('hidden');
-    } else {
-      bar.classList.add('hidden');
+      bar.innerHTML = `${ic('warn')}<span>You are not signed in to <code>claude</code>, so nothing can be analysed or generated. <a href="#" data-a="authhelp">Show me how to fix it</a></span>`;
     }
+    bar.classList.toggle('hidden', ok);
+    const link = bar.querySelector('[data-a="authhelp"]');
+    if (link) link.onclick = (e) => { e.preventDefault(); showAuthModal(); };
+    if (!ok && modal) showAuthModal();
+    return ok;
+  }
+
+  // The banner is easy to scroll past, and someone who misses it only finds out when a job
+  // they waited on fails. So the same problem also opens on arrival, with the exact command
+  // for THIS machine's OS (the server reports it) and a button to re-check without a reload.
+  let authModalOpen = false;
+  function showAuthModal() {
+    if (authModalOpen || !health) return;
+    authModalOpen = true;
+
+    const missing = !health.claude_installed;
+    const cmd = missing ? health.install_cmd : health.login_cmd;
+    const where = missing ? (health.install_shell || 'a terminal') : 'a terminal';
+    const title = missing ? 'Claude Code is not installed' : 'You are not signed in to Claude Code';
+    const why = missing
+      ? `Every workspace type drives the <code>claude</code> command line tool: it is what reads your
+         documents and does the analysis. Without it the app can show you previous work, but it
+         cannot produce anything new.`
+      : `The <code>claude</code> tool is installed but has no account attached, so it will refuse
+         every request. Signing in opens a browser, which is why it cannot be done from here.`;
+    const after = missing
+      ? `Once it finishes, sign in with <code>claude auth login</code>, then come back and press
+         <b>Check again</b>.`
+      : `It opens your browser. When it says you are signed in, come back and press
+         <b>Check again</b>.`;
+
+    const ov = el(`<div class="modal-ov"><div class="modal">
+      <div class="modal-head"><div class="mi warn">${ic('warn')}</div><h3>${title}</h3></div>
+      <div class="modal-body">
+        <p>${why}</p>
+        <p>Run this in ${where}:</p>
+        <div class="cmd-row"><code class="cmd">${cmd}</code>
+          <button class="btn ghost sm" data-a="copy">Copy</button></div>
+        <p class="muted">${after}</p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn ghost" data-a="later">Continue anyway</button>
+        <button class="btn primary" data-a="recheck">Check again</button>
+      </div>
+    </div></div>`);
+
+    const done = () => { authModalOpen = false; ov.remove(); document.removeEventListener('keydown', key); };
+    const key = e => { if (e.key === 'Escape') done(); };
+    ov.addEventListener('mousedown', e => { if (e.target === ov) done(); });
+    document.addEventListener('keydown', key);
+
+    ov.querySelector('[data-a="copy"]').onclick = async (e) => {
+      try { await navigator.clipboard.writeText(cmd); e.target.textContent = 'Copied'; }
+      catch (err) { toast('Could not copy, select the command instead', true); }
+    };
+    ov.querySelector('[data-a="later"]').onclick = done;
+    ov.querySelector('[data-a="recheck"]').onclick = async (e) => {
+      e.target.disabled = true; e.target.textContent = 'Checking ...';
+      const ok = await checkHealth();
+      done();
+      if (ok) toast('Signed in. You are ready to go.');
+      else { authModalOpen = false; showAuthModal(); toast('Still not ready', true); }
+    };
+    document.body.appendChild(ov);
   }
 
   // restore the selected workspace across F5 / reload via the URL hash (#<id>)
   async function boot() {
-    checkHealth();
+    checkHealth({ modal: true });
     try { sectionCatalogue = (await api('GET', '/api/optional-sections')).sections || []; }
     catch (e) { sectionCatalogue = []; }   // picker just hides; never blocks the app
     await loadList();
