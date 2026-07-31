@@ -35,7 +35,20 @@ No Administrator or `sudo`, nothing installed system-wide. Budget a few minutes 
 are not signed in, the installer stops and prints `claude auth login`, and the web app shows
 the same thing with a Copy button and a re-check.
 
-Then start it from the **Desktop icon**, or run `aiws` in a terminal (→ http://127.0.0.1:8000).
+### Starting and stopping
+
+Double-click the **Desktop icon**. **No terminal window appears** — it runs through `pythonw`,
+which has no console, and writes to `logs/aiws.log` instead. Your browser opens at
+http://127.0.0.1:8000. Clicking the icon again when it is already running just brings the
+browser back rather than trying to start a second server.
+
+Because there is no window, there is no Ctrl+C, so there is a **Stop AI Workflow Studio** entry
+in the Start menu, or:
+
+```
+aiws            # start in a terminal instead, output visible
+aiws stop       # stop a server that was started from the icon
+```
 
 ### Updating
 

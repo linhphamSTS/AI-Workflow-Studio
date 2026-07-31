@@ -328,35 +328,52 @@ $env:Path = "$env:Path;$BinDir"
 Write-Step 'Creating the desktop icon'
 
 $icon = Join-Path $Dir 'webapp\static\aiws.ico'
-$target = Join-Path $BinDir 'aiws.cmd'
 
-function New-AiwsShortcut($path) {
+# pythonw.exe, not python.exe and not the .cmd: either of those opens a console window, and a
+# .lnk cannot suppress one belonging to a process it starts. pythonw has no console at all.
+# tools/aiws.py notices this (sys.stdout is None) and writes to logs/aiws.log instead.
+$pyw = Join-Path $Dir 'webapp\.venv\Scripts\pythonw.exe'
+if (-not (Test-Path $pyw)) { $pyw = $null }
+
+function New-AiwsShortcut($path, $arguments, $description) {
     $sc = (New-Object -ComObject WScript.Shell).CreateShortcut($path)
-    $sc.TargetPath = $target
+    $sc.TargetPath = $pyw
+    $sc.Arguments = $arguments
     $sc.WorkingDirectory = $Dir
-    $sc.Description = 'Start AI Workflow Studio and open it in your browser'
-    # A minimised console rather than a hidden one: the server lives in that window, so the
-    # user needs something to close when they are done, but not something in their face.
-    $sc.WindowStyle = 7
+    $sc.Description = $description
     if (Test-Path $icon) { $sc.IconLocation = $icon }
     $sc.Save()
 }
 
-try {
-    # GetFolderPath, not "$env:USERPROFILE\Desktop": on a machine where OneDrive has taken
-    # over the Desktop, the literal path is not where the icons actually appear.
-    $desktop = [Environment]::GetFolderPath('Desktop')
-    New-AiwsShortcut (Join-Path $desktop 'AI Workflow Studio.lnk')
-    Write-Ok 'Added to your Desktop. Double-click it to start the app.'
+if (-not $pyw) {
+    Write-Warn 'pythonw.exe was not found in the virtual-env, so no icon was created.'
+    Write-Info 'Start the app with: aiws'
+} else {
+    try {
+        $run  = """$Dir\tools\aiws.py"" --windowless"
+        $stop = """$Dir\tools\aiws.py"" stop"
 
-    $startMenu = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Microsoft\Windows\Start Menu\Programs'
-    if (Test-Path $startMenu) {
-        New-AiwsShortcut (Join-Path $startMenu 'AI Workflow Studio.lnk')
-        Write-Info 'Also in the Start menu, so Windows search can find it.'
+        # GetFolderPath, not "$env:USERPROFILE\Desktop": on a machine where OneDrive has taken
+        # over the Desktop, the literal path is not where the icons actually appear.
+        $desktop = [Environment]::GetFolderPath('Desktop')
+        New-AiwsShortcut (Join-Path $desktop 'AI Workflow Studio.lnk') $run `
+            'Start AI Workflow Studio and open it in your browser'
+        Write-Ok 'Added to your Desktop. Double-click it: no terminal window appears.'
+
+        $startMenu = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Microsoft\Windows\Start Menu\Programs'
+        if (Test-Path $startMenu) {
+            New-AiwsShortcut (Join-Path $startMenu 'AI Workflow Studio.lnk') $run `
+                'Start AI Workflow Studio and open it in your browser'
+            # Without a console there is no Ctrl+C, so the way to stop it has to be visible
+            # somewhere a person will find it.
+            New-AiwsShortcut (Join-Path $startMenu 'Stop AI Workflow Studio.lnk') $stop `
+                'Stop the AI Workflow Studio server'
+            Write-Info 'In the Start menu too, with a "Stop AI Workflow Studio" entry.'
+        }
+    } catch {
+        Write-Warn "Could not create the shortcut: $($_.Exception.Message)"
+        Write-Info  "You can still start the app by running: aiws"
     }
-} catch {
-    Write-Warn "Could not create the shortcut: $($_.Exception.Message)"
-    Write-Info  "You can still start the app by running: aiws"
 }
 
 # ---------------------------------------------------------------- done
@@ -375,6 +392,7 @@ Write-Host ('  ' + ('-' * 62)) -ForegroundColor DarkGray
 Write-Host ''
 Write-Host '  Start the app:                 the "AI Workflow Studio" icon on your Desktop' -ForegroundColor White
 Write-Host '  Or from a terminal:            aiws' -ForegroundColor Gray
+Write-Host '  Stop it again:                 aiws stop        (or the Start-menu Stop entry)' -ForegroundColor Gray
 Write-Host '  Update to the latest code:     aiws update      (also checked on every start)' -ForegroundColor Gray
 Write-Host '  What is installed:             aiws version' -ForegroundColor Gray
 Write-Host '  It opens at:                   http://127.0.0.1:8000' -ForegroundColor Gray

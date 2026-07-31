@@ -22,11 +22,50 @@ $pathBefore = [Environment]::GetEnvironmentVariable('Path', 'User')
 # installer's shortcut step writes to the REAL Desktop even under a redirected HOME. Same trap
 # as CLAUDE_CONFIG_DIR. Record what was there so anything this run creates can be removed
 # again, and so a shortcut the user already had is never deleted.
+# Recording "did it exist" is not enough, and that cost real damage once: on a machine where
+# the app is already installed the shortcut DOES exist, the installer overwrites it to point at
+# the sandbox, and a cleanup that only deletes what it created leaves the user's icon aimed at a
+# directory this script is about to delete. So the original target is saved and put back.
 $realDesktop = [Environment]::GetFolderPath('Desktop')
 $realStart = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Microsoft\Windows\Start Menu\Programs'
-$shortcuts = @((Join-Path $realDesktop 'AI Workflow Studio.lnk'), (Join-Path $realStart 'AI Workflow Studio.lnk'))
-$shortcutExisted = @{}
-foreach ($s in $shortcuts) { $shortcutExisted[$s] = Test-Path $s }
+$shortcuts = @(
+    (Join-Path $realDesktop 'AI Workflow Studio.lnk'),
+    (Join-Path $realStart 'AI Workflow Studio.lnk'),
+    (Join-Path $realStart 'Stop AI Workflow Studio.lnk')
+)
+$shell = New-Object -ComObject WScript.Shell
+$shortcutBefore = @{}
+foreach ($s in $shortcuts) {
+    if (Test-Path $s) {
+        $o = $shell.CreateShortcut($s)
+        $shortcutBefore[$s] = @{ Target = $o.TargetPath; Args = $o.Arguments
+                                 Wd = $o.WorkingDirectory; Icon = $o.IconLocation
+                                 Desc = $o.Description; Style = $o.WindowStyle }
+    } else {
+        $shortcutBefore[$s] = $null
+    }
+}
+
+function Restore-Shortcuts {
+    foreach ($s in $script:shortcuts) {
+        $orig = $script:shortcutBefore[$s]
+        if ($null -eq $orig) {
+            if (Test-Path $s) {
+                Remove-Item $s -Force -ErrorAction SilentlyContinue
+                Write-Host "  removed $(Split-Path -Leaf $s) (this run created it)" -ForegroundColor Gray
+            }
+        } elseif (Test-Path $s) {
+            $o = $script:shell.CreateShortcut($s)
+            if ($o.TargetPath -ne $orig.Target -or $o.Arguments -ne $orig.Args) {
+                $o.TargetPath = $orig.Target; $o.Arguments = $orig.Args
+                $o.WorkingDirectory = $orig.Wd; $o.IconLocation = $orig.Icon
+                $o.Description = $orig.Desc; $o.WindowStyle = $orig.Style
+                $o.Save()
+                Write-Host "  restored $(Split-Path -Leaf $s) to its original target" -ForegroundColor Yellow
+            }
+        }
+    }
+}
 
 Write-Host "sandbox   : $sandbox"
 Write-Host "real HOME : $realHome (will be hidden from the installer)"
@@ -69,6 +108,46 @@ try {
     Write-Host "=== pass 1: fresh install ===" -ForegroundColor Magenta
     & $get -Dir $installTo -NoStart
 
+    # ---- auto-update, exercised BEFORE .git is seeded --------------------------------------
+    # It has to happen here: once a .git exists the updater deliberately stands down, so with
+    # the seeding done first this whole path would never run and would look tested.
+    Write-Host ''
+    Write-Host "=== pass 1b: auto-update from a stale version ===" -ForegroundColor Magenta
+    $script:autoUpdateResults = @{}
+    $stampPath = Join-Path $installTo '.aiws-version'
+    $dispatcher = Join-Path $installTo 'tools\aiws.py'
+    $venvPy = Join-Path $installTo 'webapp\.venv\Scripts\python.exe'
+    if ((Test-Path $stampPath) -and (Test-Path $dispatcher) -and (Test-Path $venvPy)) {
+        $realSha = (Get-Content $stampPath -Raw | ConvertFrom-Json).sha
+        $stale = '0' * 40
+        $setStale = { @{ sha = $stale; branch = 'main'; installed = 'test' } | ConvertTo-Json |
+                      Set-Content -Path $stampPath -Encoding ASCII }
+
+        # (a) explicit: aiws update must notice it is behind and move the stamp forward
+        & $setStale
+        $out = (& $venvPy $dispatcher update 2>&1) -join "`n"
+        $now = (Get-Content $stampPath -Raw | ConvertFrom-Json).sha
+        $script:autoUpdateResults['explicit update advances the version'] = @(($now -eq $realSha), $out)
+
+        # (b) implicit: the pre-start hook must do the same without being asked. Called
+        #     directly rather than through `aiws` with no arguments, because that would go on
+        #     to start a server this test has no way to shut down cleanly.
+        & $setStale
+        $hook = "import sys; sys.path.insert(0, r'$(Join-Path $installTo 'tools')'); " +
+                "import aiws; aiws.check_quietly()"
+        $out2 = (& $venvPy -c $hook 2>&1) -join "`n"
+        $now2 = (Get-Content $stampPath -Raw | ConvertFrom-Json).sha
+        $script:autoUpdateResults['start-up hook updates by itself'] = @(($now2 -eq $realSha), $out2)
+        $script:autoUpdateResults['start-up hook says what it is doing'] =
+            @(($out2 -match 'newer version'), $out2)
+
+        # (c) and it must NOT fire when there is nothing to do
+        $out3 = (& $venvPy -c $hook 2>&1) -join "`n"
+        $script:autoUpdateResults['start-up hook is silent when current'] = @(($out3.Trim() -eq ''), $out3)
+    } else {
+        $script:autoUpdateResults['auto-update testable'] = @($false, 'stamp, dispatcher or venv missing')
+    }
+
     # Seed the two things an update must not destroy, then install again over the top. .git is
     # the one that matters: a GitHub archive has no .git, so a mirroring copy would wipe the
     # history of anyone who pointed the installer at a clone.
@@ -87,6 +166,18 @@ finally {
     $env:USERPROFILE = $realHome
     $env:HOME = $realHome
     if ($realConfigDir) { $env:CLAUDE_CONFIG_DIR = $realConfigDir }
+
+    # In the finally, not at the end of the script: an abort part way through still leaves a
+    # shortcut aimed at the sandbox, and that is exactly how this went wrong before. The checks
+    # below read the shortcut state captured here, so nothing is lost by restoring first.
+    $script:lnkAfter = @{}
+    foreach ($s in $shortcuts) {
+        if (Test-Path $s) {
+            $o = $shell.CreateShortcut($s)
+            $script:lnkAfter[$s] = @{ Target = $o.TargetPath; Args = $o.Arguments; Icon = $o.IconLocation }
+        }
+    }
+    Restore-Shortcuts
 
     # Prove the isolation held rather than assuming it: no real profile may point at the sandbox.
     foreach ($p in (Get-ChildItem $realHome -Directory -Filter '.claude*' -ErrorAction SilentlyContinue)) {
@@ -126,25 +217,28 @@ Check 'update keeps .git'      (Test-Path (Join-Path $installTo '.git\HEAD')) 't
 Check 'update keeps workspaces' (Test-Path (Join-Path $installTo 'webapp\workspaces\demo\meta.json')) 'generated work was deleted'
 Check 'update keeps the venv'  (Test-Path (Join-Path $installTo 'webapp\.venv\Scripts\python.exe')) 'the venv was deleted'
 
-# the shortcut step, checked against the REAL desktop because that is where it lands
+# The shortcut step, judged from the snapshot taken in the finally BEFORE the originals were
+# put back, because by now the icons have been restored to whatever they were.
 foreach ($s in $shortcuts) {
-    $name = if ($s -like "*Desktop*") { 'desktop shortcut' } else { 'start menu shortcut' }
-    Check "$name created" (Test-Path $s) "not found at $s"
+    $leaf = Split-Path -Leaf $s
+    $where = if ($s -like "*Desktop*") { 'desktop' } else { 'start menu' }
+    Check "$where shortcut created: $leaf" ($lnkAfter.ContainsKey($s)) "not found at $s"
 }
 $deskLnk = $shortcuts[0]
-if (Test-Path $deskLnk) {
-    $sc = (New-Object -ComObject WScript.Shell).CreateShortcut($deskLnk)
-    # Do not compare the two paths as strings. $env:TEMP hands back an 8.3 short name here, so
-    # the .cmd holds the SHORT spelling (written from -Dir verbatim) while Windows stores the
-    # LONG one in the .lnk, and neither Resolve-Path nor FileSystemObject expands the other.
-    # Compare what the shortcut actually opens instead: the file it points at must BE this
-    # install's launcher. That is the property worth asserting, and it cannot be fooled by
-    # spelling.
-    $mine = Join-Path $installTo 'bin\aiws.cmd'
-    $same = (Test-Path $sc.TargetPath) -and
-            ((Get-Content $sc.TargetPath -Raw) -eq (Get-Content $mine -Raw))
-    Check 'shortcut opens this install''s launcher' $same "points at $($sc.TargetPath)"
-    Check 'shortcut carries the app icon' ($sc.IconLocation -like '*aiws.ico*') "icon is $($sc.IconLocation)"
+if ($lnkAfter.ContainsKey($deskLnk)) {
+    $a = $lnkAfter[$deskLnk]
+    # The whole point of the no-terminal work: the icon must run pythonw, which has no console,
+    # and must pass --windowless so aiws.py redirects its output to a log instead of a dead
+    # stdout. A .cmd or python.exe here would open the window this is meant to avoid.
+    Check 'icon runs pythonw (no console)' ($a.Target -like '*pythonw.exe') "target is $($a.Target)"
+    Check 'icon passes --windowless' ($a.Args -like '*--windowless*') "args are $($a.Args)"
+    Check 'icon points at this install' ($a.Args -like "*aiws-it*") "args are $($a.Args)"
+    Check 'icon carries the app icon' ($a.Icon -like '*aiws.ico*') "icon is $($a.Icon)"
+}
+$stopLnk = $shortcuts[2]
+if ($lnkAfter.ContainsKey($stopLnk)) {
+    Check 'stop entry calls stop' ($lnkAfter[$stopLnk].Args -like '* stop*') `
+        "args are $($lnkAfter[$stopLnk].Args)"
 }
 
 $skills = @('linhpham-diagram', 'linhpham-technicalproposal', 'linhpham-wbs')
@@ -170,6 +264,11 @@ if (Test-Path (Join-Path $installTo 'bin\aiws.cmd')) {
         "pinned $($exe.Groups[1].Value) instead of the venv python"
     Check 'launcher goes through the aiws dispatcher' ($lc -like '*tools\aiws.py*') `
         'calls launch.py directly, so update/version would not exist'
+}
+
+# auto-update, measured during pass 1b while the install was not yet a git checkout
+foreach ($k in $autoUpdateResults.Keys) {
+    Check $k $autoUpdateResults[$k][0] ($autoUpdateResults[$k][1] -replace "`n", ' | ')
 }
 
 # the version stamp, and the update commands built on it
@@ -198,15 +297,6 @@ $vpy = Join-Path $installTo 'webapp\.venv\Scripts\python.exe'
 if (Test-Path $vpy) {
     & $vpy -c "import fastapi, uvicorn, PIL, docx, openpyxl, fitz; print('deps import OK')"
     Check 'venv dependencies import' ($LASTEXITCODE -eq 0) 'an import failed'
-}
-
-# Put the desktop back the way it was. Leaving a shortcut that points into a sandbox about to
-# be deleted would be worse than never having tested the step.
-foreach ($s in $shortcuts) {
-    if (-not $shortcutExisted[$s] -and (Test-Path $s)) {
-        Remove-Item $s -Force -ErrorAction SilentlyContinue
-        Write-Host "  cleaned up $(Split-Path -Leaf $s) from $(Split-Path -Parent $s)" -ForegroundColor Gray
-    }
 }
 
 Write-Host ''

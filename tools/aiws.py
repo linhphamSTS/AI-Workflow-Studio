@@ -2,9 +2,14 @@
 """The `aiws` command: start the app, and keep it up to date.
 
     aiws              check for a new version, apply it, then start the app
+    aiws stop         stop a server that was started without a window
     aiws update       update now and do not start
     aiws version      print the installed commit and whether a newer one exists
     aiws --no-update  start without checking
+
+The Desktop shortcut runs this under pythonw with --windowless, so no console appears. Output
+goes to logs/aiws.log instead, and `aiws stop` is how it is shut down, since there is no window
+to press Ctrl+C in.
 
 The launcher script written by the installer calls this file, so the behaviour lives in one
 place for Windows, macOS and Linux instead of being duplicated into a .cmd and a shell script.
@@ -36,7 +41,47 @@ ROOT = HERE.parent
 REPO = "linhphamSTS/AI-Workflow-Studio"
 BRANCH = "main"
 STAMP = ROOT / ".aiws-version"
+PIDFILE = ROOT / ".aiws-pid"
+LOGFILE = ROOT / "logs" / "aiws.log"
 IS_WIN = os.name == "nt"
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WIN else 0
+
+
+def server_python() -> str:
+    """The interpreter the SERVER must run under.
+
+    Deliberately python.exe and never pythonw.exe: launch.py decides whether it is already
+    inside the virtual-env by comparing sys.executable against .venv/Scripts/python.exe, so
+    handing it pythonw makes it conclude it is outside, re-exec into python.exe, and open the
+    console the windowless mode exists to avoid.
+    """
+    venv = ROOT / "webapp" / (".venv/Scripts/python.exe" if IS_WIN else ".venv/bin/python")
+    return str(venv) if venv.exists() else sys.executable
+
+
+def app_port() -> int:
+    try:
+        return int(os.environ.get("DIAGRAM_PORT", "8000"))
+    except ValueError:
+        return 8000
+
+
+def already_serving(port: int) -> bool:
+    """Is something answering on the app's port? Used so a second double-click opens the
+    browser instead of starting a second server that then fails to bind."""
+    import socket
+    with socket.socket() as s:
+        s.settimeout(0.4)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def go_windowless() -> None:
+    """Send output to a log file, because under pythonw sys.stdout is None and the first
+    print() would raise AttributeError before anything started."""
+    LOGFILE.parent.mkdir(parents=True, exist_ok=True)
+    f = open(LOGFILE, "w", encoding="utf-8", buffering=1)
+    sys.stdout = f
+    sys.stderr = f
 
 
 def installed_sha() -> str | None:
@@ -119,16 +164,81 @@ def check_quietly() -> None:
         print(f"  (update skipped: {e})", flush=True)
 
 
-def start_app(argv: list[str]) -> int:
+def start_app(argv: list[str], windowless: bool = False) -> int:
     launch = ROOT / "webapp" / "launch.py"
     if not launch.exists():
         print(f"[!] {launch} is missing. Re-run the installer.")
         return 1
-    return subprocess.run([sys.executable, str(launch), *argv]).returncode
+
+    port = app_port()
+    if windowless and already_serving(port):
+        # Double-clicking the icon again should show the app, not fail to bind a second server.
+        print(f"- already running on port {port}, opening the browser")
+        import webbrowser
+        webbrowser.open(f"http://127.0.0.1:{port}")
+        return 0
+
+    cmd = [server_python(), str(launch), *argv]
+    if not windowless:
+        return subprocess.run(cmd).returncode
+
+    # No console anywhere: this process has none (pythonw) and the child is told not to make
+    # one. Its output goes to the same log, so a silent failure is still diagnosable.
+    proc = subprocess.Popen(cmd, stdout=sys.stdout, stderr=sys.stderr,
+                            creationflags=_NO_WINDOW)
+    try:
+        PIDFILE.write_text(json.dumps({"pid": proc.pid, "port": port}), encoding="utf-8")
+    except OSError:
+        pass
+    print(f"- started pid {proc.pid} on port {port}; stop it with: aiws stop")
+    rc = proc.wait()
+    PIDFILE.unlink(missing_ok=True)
+    return rc
+
+
+def stop_app() -> int:
+    """Stop a windowless server. Without this there is no way to stop one: there is no console
+    to press Ctrl+C in, which is the cost of not showing a window."""
+    port = app_port()
+    pid = None
+    try:
+        pid = json.loads(PIDFILE.read_text(encoding="utf-8")).get("pid")
+    except Exception:  # noqa: BLE001
+        pass
+    if not pid:
+        if already_serving(port):
+            print(f"- something is serving on port {port} but no pid file was found.")
+            print("    It was probably started from a terminal: press Ctrl+C there.")
+            return 1
+        print("- not running")
+        return 0
+    if IS_WIN:
+        rc = subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                            capture_output=True, creationflags=_NO_WINDOW).returncode
+    else:
+        try:
+            os.kill(pid, 15)
+            rc = 0
+        except ProcessLookupError:
+            rc = 0
+        except OSError:
+            rc = 1
+    PIDFILE.unlink(missing_ok=True)
+    print("- stopped" if rc == 0 else f"- could not stop pid {pid}")
+    return rc
 
 
 def main() -> int:
     args = sys.argv[1:]
+
+    # sys.stdout is None under pythonw, which is how the Desktop shortcut runs this.
+    windowless = "--windowless" in args or sys.stdout is None
+    if windowless:
+        go_windowless()
+        args = [a for a in args if a != "--windowless"]
+
+    if args and args[0] in ("stop", "--stop"):
+        return stop_app()
 
     if args and args[0] in ("update", "--update", "-u"):
         return do_update(force="--force" in args)
@@ -158,7 +268,7 @@ def main() -> int:
     passthrough = [a for a in args if a != "--no-update"]
     if "--no-update" not in args:
         check_quietly()
-    return start_app(passthrough)
+    return start_app(passthrough, windowless=windowless)
 
 
 if __name__ == "__main__":
