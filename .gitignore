@@ -7,3 +7,7 @@ desktop.ini
 # alongside the file it shadows is a second source of truth that goes stale.
 *.bak
 *.bak_*
+
+# The logo fetchers are node scripts, so running one drops a node_modules beside the
+# skill. The PNGs it produces are committed; the toolchain that produced them is not.
+node_modules/

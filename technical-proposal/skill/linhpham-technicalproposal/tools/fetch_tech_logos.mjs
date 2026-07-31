@@ -45,6 +45,13 @@ const MAP = {
   mysql:`${D}/mysql/mysql-original.svg`, swift:`${D}/swift/swift-original.svg`,
   helm:`${D}/helm/helm-original.svg`, elasticsearch:`${D}/elasticsearch/elasticsearch-original.svg`,
   i18next:'https://cdn.simpleicons.org/i18next/26A69A',
+  // Technologies a recent bid named in its stack table with no logo to show for them.
+  // Devicon carries the first three; OpenAPI and Flyway are not in devicon, so they come
+  // from simpleicons with the brand colour baked into the URL.
+  fastapi:`${D}/fastapi/fastapi-original.svg`, nextjs:`${D}/nextjs/nextjs-original.svg`,
+  junit:`${D}/junit/junit-original.svg`,
+  openapi:'https://cdn.simpleicons.org/openapiinitiative/6BA539',
+  flyway:'https://cdn.simpleicons.org/flyway/CC0000',
 };
 
 fs.mkdirSync(DEST, { recursive: true });
