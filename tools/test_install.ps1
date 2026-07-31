@@ -71,6 +71,15 @@ Write-Host "sandbox   : $sandbox"
 Write-Host "real HOME : $realHome (will be hidden from the installer)"
 Write-Host ''
 
+# A previous run that died after starting the server leaves it holding logs/aiws.log, and then
+# the wipe below fails and this suite cannot run at all. Kill anything under the sandbox first.
+$stale = @(Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" |
+           Where-Object { $_.CommandLine -like "*$(Split-Path -Leaf $sandbox)*" })
+foreach ($p in $stale) {
+    Write-Host "  killing a process left over from a previous run: $($p.ProcessId)" -ForegroundColor Yellow
+    taskkill /F /T /PID $p.ProcessId 2>&1 | Out-Null
+}
+if ($stale) { Start-Sleep -Seconds 2 }
 if (Test-Path $sandbox) { Remove-Item $sandbox -Recurse -Force }
 New-Item -ItemType Directory -Path $fakeHome -Force | Out-Null
 
@@ -91,6 +100,18 @@ if (Test-Path $gvReal) {
 }
 
 $ok = $false
+
+# Results gathered inside the try block, reported after it. Deliberately a FUNCTION with
+# space-separated parameters rather than @(condition, detail) arrays: in an array literal the
+# comma binds tighter than -eq/-ge/-match, so @($a -eq $b, $c) compares $a against the ARRAY
+# ($b, $c) and dies on a type mismatch or an invalid regex escape. That bug was written twice
+# in this file, fixed once, then reintroduced in the next block added. Removing the construct
+# is the only fix that holds.
+$script:collected = @()
+function Record($name, $cond, $detail = '') {
+    $script:collected += , @{ Name = $name; Ok = [bool]$cond; Detail = "$detail" }
+}
+
 try {
     $env:USERPROFILE = $fakeHome
     $env:HOME = $fakeHome
@@ -127,7 +148,7 @@ try {
         & $setStale
         $out = (& $venvPy $dispatcher update 2>&1) -join "`n"
         $now = (Get-Content $stampPath -Raw | ConvertFrom-Json).sha
-        $script:autoUpdateResults['explicit update advances the version'] = @(($now -eq $realSha), $out)
+        Record 'explicit update advances the version' ($now -eq $realSha) $out
 
         # (b) implicit: the pre-start hook must do the same without being asked. Called
         #     directly rather than through `aiws` with no arguments, because that would go on
@@ -137,15 +158,41 @@ try {
                 "import aiws; aiws.check_quietly()"
         $out2 = (& $venvPy -c $hook 2>&1) -join "`n"
         $now2 = (Get-Content $stampPath -Raw | ConvertFrom-Json).sha
-        $script:autoUpdateResults['start-up hook updates by itself'] = @(($now2 -eq $realSha), $out2)
-        $script:autoUpdateResults['start-up hook says what it is doing'] =
-            @(($out2 -match 'newer version'), $out2)
+        Record 'start-up hook updates by itself' ($now2 -eq $realSha) $out2
+        Record 'start-up hook says what it is doing' ($out2 -match 'newer version') $out2
 
         # (c) and it must NOT fire when there is nothing to do
         $out3 = (& $venvPy -c $hook 2>&1) -join "`n"
-        $script:autoUpdateResults['start-up hook is silent when current'] = @(($out3.Trim() -eq ''), $out3)
+        Record 'start-up hook is silent when current' ($out3.Trim() -eq '') $out3
     } else {
-        $script:autoUpdateResults['auto-update testable'] = @($false, 'stamp, dispatcher or venv missing')
+        Record 'auto-update testable' $false 'stamp, dispatcher or venv missing'
+    }
+
+    # ---- start it the way the icon does, then stop it ---------------------------------------
+    # Added because a stop that reported success left a descendant holding the socket: the
+    # recorded pid died, the grandchild did not, and nothing noticed. The condition worth
+    # asserting is that the PORT is free and no launch.py process survives.
+    $pyw = Join-Path $installTo 'webapp\.venv\Scripts\pythonw.exe'
+    $testPort = 8031        # not 8000: must not disturb a server the user is actually using
+    if ((Test-Path $pyw) -and (Test-Path $dispatcher)) {
+        $env:DIAGRAM_PORT = "$testPort"
+        Start-Process -FilePath $pyw -ArgumentList """$dispatcher""", '--windowless' -WorkingDirectory $installTo
+        Start-Sleep -Seconds 14
+        $listening = { (netstat -ano | Select-String "127.0.0.1:$testPort" |
+                        Select-String 'LISTENING' | Measure-Object).Count }
+        Record 'icon start brings the server up' ((& $listening) -ge 1) 'nothing listening'
+
+        $stopOut = (& $venvPy $dispatcher stop 2>&1) -join ' '
+        Start-Sleep -Seconds 2
+        Record 'stop frees the port' ((& $listening) -eq 0) "still listening; $stopOut"
+        $orphans = @(Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" |
+                     Where-Object { $_.CommandLine -like "*$installTo*" })
+        $orphanDetail = "$($orphans.Count) left: $($orphans.CommandLine -join ' | ')"
+        Record 'stop leaves no orphan process' ($orphans.Count -eq 0) $orphanDetail
+        foreach ($o in $orphans) { taskkill /F /T /PID $o.ProcessId 2>&1 | Out-Null }
+        Remove-Item Env:\DIAGRAM_PORT -ErrorAction SilentlyContinue
+    } else {
+        Record 'round trip testable' $false 'pythonw or dispatcher missing'
     }
 
     # Seed the two things an update must not destroy, then install again over the top. .git is
@@ -266,10 +313,8 @@ if (Test-Path (Join-Path $installTo 'bin\aiws.cmd')) {
         'calls launch.py directly, so update/version would not exist'
 }
 
-# auto-update, measured during pass 1b while the install was not yet a git checkout
-foreach ($k in $autoUpdateResults.Keys) {
-    Check $k $autoUpdateResults[$k][0] ($autoUpdateResults[$k][1] -replace "`n", ' | ')
-}
+# measured inside the try block: auto-update, and the start/stop round trip
+foreach ($r in $collected) { Check $r.Name $r.Ok ($r.Detail -replace "`n", ' | ') }
 
 # the version stamp, and the update commands built on it
 $stamp = Join-Path $installTo '.aiws-version'

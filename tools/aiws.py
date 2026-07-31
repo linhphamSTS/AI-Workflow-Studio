@@ -149,19 +149,39 @@ def do_update(force: bool = False) -> int:
     return run_installer()
 
 
-def check_quietly() -> None:
+def update_verdict() -> tuple[str, str | None]:
+    """What the pre-start check decided, without acting on it.
+
+    Split out from check_quietly so the progress window can say which of these is happening
+    instead of showing one vague "working" message for a 4-second check and a 65 MB download.
+    """
+    if os.environ.get("AIWS_NO_UPDATE") == "1":
+        return "disabled", None
+    if is_git_checkout():
+        return "git", None
+    have, want = installed_sha(), latest_sha(timeout=4.0)
+    if not want:
+        return "offline", None
+    if have == want:
+        return "current", want
+    return "behind", want
+
+
+def check_quietly(post=None) -> None:
     """Auto-update on the way to starting the app. Any failure here is reported and ignored:
     not being able to update is never a reason to stop someone opening the app."""
-    if os.environ.get("AIWS_NO_UPDATE") == "1" or is_git_checkout():
+    say = post or (lambda _m: None)
+    verdict, want = update_verdict()
+    if verdict != "behind":
         return
-    have, want = installed_sha(), latest_sha(timeout=4.0)
-    if not want or have == want:
-        return
-    print(f"- a newer version is available ({want[:7]}), updating before start ...", flush=True)
+    msg = f"a newer version is available ({want[:7]}), updating before start ..."
+    print(f"- {msg}", flush=True)
+    say("Downloading a new version. This can take a minute.")
     try:
         run_installer()
     except Exception as e:  # noqa: BLE001
         print(f"  (update skipped: {e})", flush=True)
+        say("Update skipped, starting the version already installed.")
 
 
 def start_app(argv: list[str], windowless: bool = False) -> int:
@@ -196,36 +216,151 @@ def start_app(argv: list[str], windowless: bool = False) -> int:
     return rc
 
 
+def start_windowless(skip_update: bool) -> int:
+    """Icon launch: a progress window, then the server, then the browser.
+
+    The window exists because everything here is otherwise invisible. It also decides when the
+    app is READY by waiting for the port to answer rather than for a fixed number of seconds,
+    so the browser never opens onto a connection error.
+    """
+    import time
+    import webbrowser
+
+    port = app_port()
+    if already_serving(port):
+        print(f"- already running on port {port}, opening the browser")
+        webbrowser.open(f"http://127.0.0.1:{port}")
+        return 0
+
+    launch = ROOT / "webapp" / "launch.py"
+    if not launch.exists():
+        print(f"[!] {launch} is missing. Re-run the installer.")
+        return 1
+
+    def work(post) -> int:
+        if not skip_update:
+            post("Checking for updates ...")
+            check_quietly(post)
+
+        post("Starting the server ...")
+        proc = subprocess.Popen([server_python(), str(launch)],
+                                stdout=sys.stdout, stderr=sys.stderr,
+                                creationflags=_NO_WINDOW)
+        try:
+            PIDFILE.write_text(json.dumps({"pid": proc.pid, "port": port}), encoding="utf-8")
+        except OSError:
+            pass
+
+        # First launch after an update installs dependencies, so this is generous. Watching the
+        # process as well as the port means a crash is noticed at once instead of at the timeout.
+        deadline = time.time() + 120
+        post("Waiting for it to come up ...")
+        while time.time() < deadline:
+            if already_serving(port):
+                post("Opening your browser ...")
+                webbrowser.open(f"http://127.0.0.1:{port}")
+                time.sleep(1.2)          # let the window be seen rather than blink out
+                return 0
+            if proc.poll() is not None:
+                post(f"It stopped before serving. See logs/aiws.log")
+                time.sleep(5)
+                return 1
+            time.sleep(0.5)
+
+        post("Gave up waiting. See logs/aiws.log")
+        time.sleep(5)
+        return 1
+
+    icon = ROOT / "webapp" / "static" / "aiws.png"
+    try:
+        from splash import Splash                       # sits beside this file
+    except ImportError:
+        sys.path.insert(0, str(HERE))
+        try:
+            from splash import Splash
+        except Exception:                               # noqa: BLE001
+            return work(lambda _m: None)                # no window, same work
+    return Splash(icon if icon.exists() else None).run(work)
+
+
+def _kill(pid: int) -> None:
+    if IS_WIN:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                       capture_output=True, creationflags=_NO_WINDOW)
+    else:
+        try:
+            os.kill(pid, 15)
+        except OSError:
+            pass
+
+
+def port_owners(port: int) -> list[int]:
+    """Every process listening on the port. Needed because killing the recorded pid is not
+    enough: launch.py hands off to a child, and a descendant has been observed surviving a
+    tree kill and continuing to hold the socket while `stop` reported success."""
+    pids: set[int] = set()
+    try:
+        if IS_WIN:
+            out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True,
+                                 text=True, creationflags=_NO_WINDOW).stdout
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) >= 5 and parts[3] == "LISTENING" and parts[1].endswith(f":{port}"):
+                    pids.add(int(parts[4]))
+        else:
+            out = subprocess.run(["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
+                                 capture_output=True, text=True).stdout
+            pids.update(int(x) for x in out.split())
+    except Exception:  # noqa: BLE001
+        pass
+    return sorted(pids)
+
+
 def stop_app() -> int:
     """Stop a windowless server. Without this there is no way to stop one: there is no console
-    to press Ctrl+C in, which is the cost of not showing a window."""
+    to press Ctrl+C in, which is the cost of not showing a window.
+
+    The success condition is that the PORT IS FREE, not that a pid was signalled. Reporting
+    "stopped" while something still answers is the failure mode this exists to prevent.
+    """
+    import time
     port = app_port()
+
     pid = None
     try:
         pid = json.loads(PIDFILE.read_text(encoding="utf-8")).get("pid")
     except Exception:  # noqa: BLE001
         pass
-    if not pid:
-        if already_serving(port):
-            print(f"- something is serving on port {port} but no pid file was found.")
-            print("    It was probably started from a terminal: press Ctrl+C there.")
-            return 1
+
+    if not pid and not already_serving(port):
         print("- not running")
+        PIDFILE.unlink(missing_ok=True)
         return 0
-    if IS_WIN:
-        rc = subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
-                            capture_output=True, creationflags=_NO_WINDOW).returncode
-    else:
-        try:
-            os.kill(pid, 15)
-            rc = 0
-        except ProcessLookupError:
-            rc = 0
-        except OSError:
-            rc = 1
+
+    if pid:
+        _kill(pid)
+
+    # Then make the port the authority, with a couple of passes for anything that outlived
+    # the tree kill or was started from a terminal without a pid file.
+    for attempt in range(3):
+        time.sleep(0.6)
+        if not already_serving(port):
+            break
+        owners = [p for p in port_owners(port) if p != os.getpid()]
+        if not owners:
+            break
+        if attempt == 0 and not pid:
+            print(f"- no pid file; stopping whatever holds port {port}: {owners}")
+        for p in owners:
+            _kill(p)
+
     PIDFILE.unlink(missing_ok=True)
-    print("- stopped" if rc == 0 else f"- could not stop pid {pid}")
-    return rc
+    if already_serving(port):
+        print(f"- something is STILL answering on port {port}. Remaining: {port_owners(port)}")
+        print("    If you started it from a terminal, press Ctrl+C there.")
+        return 1
+    print("- stopped")
+    return 0
 
 
 def main() -> int:
@@ -265,10 +400,15 @@ def main() -> int:
         print(__doc__)
         return 0
 
-    passthrough = [a for a in args if a != "--no-update"]
-    if "--no-update" not in args:
+    skip_update = "--no-update" in args
+    if windowless:
+        # The icon path gets the progress window, which owns the update check too so it can
+        # report on it. A terminal launch already shows everything, so it stays as it was.
+        return start_windowless(skip_update)
+
+    if not skip_update:
         check_quietly()
-    return start_app(passthrough, windowless=windowless)
+    return start_app([a for a in args if a != "--no-update"])
 
 
 if __name__ == "__main__":
