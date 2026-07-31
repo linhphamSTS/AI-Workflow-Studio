@@ -1,14 +1,26 @@
-# Diagram-WorkFlow
+# Diagram — `/linhpham-diagram`
 
-A reusable Claude Code skill — **`/linhpham-diagram`** — that turns a plain-language description of a
-diagram into a professional, senior-SA-grade diagram: a sharp (>= 300 DPI) PNG plus an editable
-`.drawio`. The user describes what they want in ordinary words (often vague); the skill **reviews and
-rewrites** that into a rigorous, standards-based spec — classifying the diagram type, suggesting the
-best-fitting options for the user to choose, and filling in the correct notation — before drawing.
+A reusable Claude Code skill that turns a plain-language description of a diagram into a
+professional, senior-SA-grade diagram: a sharp (>= 300 DPI) PNG, an editable `.drawio` that matches
+it, and a per-diagram `.docx` in the proposal figure-block format. The user describes what they want
+in ordinary words (often vague); the skill **reviews and rewrites** that into a rigorous,
+standards-based spec — classifying the diagram type, suggesting the best-fitting options for the
+user to choose, and filling in the correct notation — before drawing.
+
+This skill lives inside the [AI Workflow Studio](../README.md) monorepo, alongside sibling skills
+such as `/linhpham-technicalproposal` and `/linhpham-wbs`, and a shared web app that drives them.
+
+**Two input modes**, detected from what you pass:
 
 ```
-/linhpham-diagram <free-text description of the diagram you want>
+/linhpham-diagram <free-text description>    # TEXT MODE   -> one diagram
+/linhpham-diagram <path to a docs folder>    # FOLDER MODE -> a fitting SET of diagrams
 ```
+
+FOLDER MODE ingests the folder (`.docx` / `.xlsx` / `.pdf` / `.md` / text) into one digest, analyses
+it, and proposes the diagram set the documents actually call for — system context, cloud
+architecture, microservices, ERD, sequences, CI/CD, security — each justified from the source, for
+the user to pick from before anything is drawn.
 
 ## Why
 
@@ -31,12 +43,22 @@ Phase prompts live in `skill/linhpham-diagram/prompts/00..05`.
 
 | Family | Engine | Script |
 |---|---|---|
-| Cloud/infra reference architecture, K8s, Docker, on-prem, deployment | mingrammer `diagrams` (vendor icons) + Graphviz | authored Python script |
+| Cloud/infra reference architecture, K8s, Docker, on-prem, deployment | **manual-grid PIL renderer** with real vendor icons, driven by a JSON spec | `scripts/build_cloud.py` (specs in `scripts/cloud_specs.py`) |
 | Structural / process / hierarchy / data / DevOps (flowchart, C4, microservices, ERD, DFD, state, class, org chart, mind map, network, CI-CD, business context, …) | Graphviz `dot`/`twopi`/`neato`/`circo` from a JSON spec | `scripts/build_graph.py` |
 | Sequence / interaction | PIL lifeline renderer from a JSON spec | `scripts/build_sequence.py` |
 
-All output is >= 300 DPI PNG + (where supported) an editable `.drawio` that matches the PNG, plus a
-`diagrams.json` sidecar (caption + intro + explanation bullets).
+**Why the cloud family is hand-laid rather than auto-laid.** Auto-layout produced curvy-spaghetti
+edges, spider-web shared services and half-empty boundary boxes, so `build_cloud` places tiers as
+columns, spans boundary boxes across them, and routes connectors orthogonally by hand. Tier-crossing
+edges route around the columns through a clear bus lane instead of straight through the middle, and
+a render-time layout lint measures every label, header and icon box with the real fonts and fails
+the render on an overlap, a clipped label or a truncated one. `scripts/diagram_templates.py` keeps
+canonical specs per cloud slug, all of which call `build_cloud.render`.
+
+All output is >= 300 DPI PNG at the 6.5in Word embed width, plus an editable `.drawio` that matches
+the PNG structurally (native stencils, real edges — never a flat screenshot), a `.svg` twin where
+the engine emits one, a per-diagram `.docx`, and a `diagrams.json` sidecar (caption + intro +
+explanation bullets).
 
 ## Knowledge base (`skill/linhpham-diagram/reference/`)
 
@@ -70,5 +92,9 @@ Creates a junction/symlink from every Claude profile's `skills/linhpham-diagram/
 ## Requirements
 
 Python 3.10+ with Pillow. `bootstrap()` auto-installs the `diagrams` package + a portable Graphviz on
-first use (Windows auto-download; macOS/Linux prints the one-line `brew`/`apt` command). Node is only
-needed if logo-fetch tooling is added later.
+first use (Windows auto-download; macOS/Linux prints the one-line `brew`/`apt` command). FOLDER MODE
+additionally reads `.docx` with `python-docx`, `.xlsx` with `openpyxl` and `.pdf` with PyMuPDF; a
+legacy `.doc` is not supported.
+
+Node is needed only to **re-fetch icons**, not to render: `skill/linhpham-diagram/tools/fetch_ai_logos.mjs`
+pulls the AI/LLM logo pack. The PNGs it produces are committed, so a fresh clone renders without Node.

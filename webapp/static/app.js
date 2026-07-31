@@ -85,18 +85,19 @@ const App = (() => {
 
   function openHelp() {
     const steps = [
-      ['plus', 'Create a workspace &amp; pick a type', 'Click <b>New workspace</b> and choose what to make: a <b>Diagram</b> (one SA-grade diagram, fast local render) or a <b>Technical Proposal</b> (a full <b>.docx</b> from a folder of RFP + docs). Each workspace keeps its own inputs, versions and output.'],
-      ['edit', 'Describe the diagram', 'Type a plain-language prompt (e.g. “our AWS setup for a ride-hailing backend”, “the checkout sequence with the payment gateway”, “the order lifecycle state machine”). Optionally add docs: drag files onto the box, <b>Choose files</b>, <b>Upload a folder</b>, or <b>Browse…</b> a folder on this machine.'],
-      ['spark', 'Refine', 'Click <b>Refine spec</b>. The real skill runs head-less via the <code>claude</code> CLI (usually 3–5 minutes): it reads the diagram knowledge base and designs a rigorous, standards-based spec, then stops for your review. You can watch the job log while it works.'],
-      ['check', 'Review &amp; confirm', 'At the gate, check the proposed diagram(s) and the rationale. Fine-tune the spec JSON if you like (advanced), or <b>Edit inputs &amp; re-refine</b>. When happy, click <b>Generate diagrams</b>.'],
-      ['grid', 'Preview &amp; formats', 'Each render appears as a tile. Open any format: <b>PNG</b> (sharp image), <b>SVG</b> (vector), editable <b>.drawio</b>, or a Word <b>.docx</b> with the figure and description. Click an image to zoom.'],
-      ['code', 'Versions &amp; compare', 'Every <b>Generate</b> is saved as a numbered <b>version</b>. Use the version timeline to view any one; click <b>Compare</b> to see two side by side with their self-check results and pick the better one. The <b>Version history</b> card is reachable from any screen.'],
-      ['play', 'Iterate', '<b>Iterate from vN</b> loads that version’s spec back so you can tweak it and regenerate — that becomes a new version, so nothing is ever lost. <b>Edit inputs</b> changes the prompt/docs and re-refines.'],
-      ['download', 'Export', '<b>Export vN</b> downloads a zip of that version: PNG + SVG + .drawio + .docx + a diagrams.json manifest.'],
+      ['plus', 'Create a workspace &amp; pick a type', 'Click <b>New workspace</b> and choose what to make: a <b>Diagram</b> (one SA-grade figure, rendered locally in seconds), a <b>Technical Proposal</b> (a SharePoint-ready <b>.docx</b> with its architecture figures), or a <b>WBS + Cost</b> (an estimated work-breakdown workbook, plus a cloud cost workbook where infrastructure is in scope). WBS asks one more question: <b>fill</b> a WBS the client sent, or <b>author</b> the breakdown from an RFP. Each workspace keeps its own inputs, versions and output.'],
+      ['edit', 'Give it inputs', 'A <b>diagram</b> starts from a plain-language prompt (“our AWS setup for a ride-hailing backend”, “the checkout sequence with the payment gateway”), with documents optional. A <b>proposal</b> or a <b>WBS</b> starts from the bid folder: drag files onto the box, <b>Choose files</b>, <b>Upload a folder</b>, or <b>Browse…</b> a folder on this machine. Give it everything — the RFP, the client’s spreadsheet, the Q&amp;A — because what is not ingested cannot be estimated or answered.'],
+      ['spark', 'Refine / Analyze', 'The real skill now runs head-less via the <code>claude</code> CLI, reads its own knowledge base, and stops before producing anything. A diagram refine takes roughly 3–5 minutes from a prompt and longer from a folder; a proposal or WBS analysis takes longer still. Watch the job log while it works, and <b>Stop</b> is always available.'],
+      ['check', 'Review &amp; confirm at the gate', 'Nothing is built until you approve here, because this is the cheapest place to correct it. A diagram shows the proposed figures and the reasoning; a proposal shows the stack and the architecture; a WBS shows the module structure, the columns, and the factor table with both the downward and the upward factors. Edit it, or go back and change the inputs.'],
+      ['play', 'Generate', 'A diagram renders locally with no LLM, so it is fast and repeatable. A proposal runs the full generate, assemble and strict format-review pipeline. A WBS estimates every task, builds the workbooks and refuses to finish until its verifier passes.'],
+      ['grid', 'Preview', 'Diagram output opens as tiles in every format: <b>PNG</b>, <b>SVG</b>, an editable <b>.drawio</b>, and a Word <b>.docx</b> with the figure and its description; click an image to zoom. A proposal offers the <b>.docx</b> plus its figures, and a WBS offers the workbooks.'],
+      ['code', 'Versions, compare &amp; iterate', 'Every <b>Generate</b> is saved as a numbered <b>version</b>, so nothing is ever overwritten. View any one from the timeline, or <b>Compare</b> two side by side with their self-check results to pick the better run. <b>Iterate from vN</b> loads that version back to tweak and regenerate; <b>Edit inputs</b> changes the source and re-runs from the start. The <b>Version history</b> card is reachable from any screen.'],
+      ['download', 'Export', '<b>Export vN</b> downloads that version as a zip: the figures in every format with their manifest, or the document, or the workbooks.'],
     ];
     const tips = [
       'Your place is saved in the address bar — press <b>F5</b> and the same workspace reopens (you can bookmark it too).',
-      'Refine needs the <code>claude</code> CLI signed in once. <b>Generate / Preview / Export</b> work without it.',
+      'The <code>claude</code> CLI has to be signed in once. A <b>diagram</b> only needs it to refine, so Generate / Preview / Export still work without it; a <b>proposal</b> and a <b>WBS</b> need it for their generate step too.',
+      'A long job is not stuck. If one really is killed on a timeout, raise the matching limit in the web app README rather than splitting the work up.',
       'All times are shown in your machine’s local timezone.',
     ];
     const stepHTML = steps.map((s, i) => `<div class="help-step"><div class="hs-n">${ic(s[0])}</div>
@@ -104,7 +105,7 @@ const App = (() => {
     const ov = el(`<div class="modal-ov"><div class="modal wide">
       <div class="modal-head"><div class="mi">${ic('info')}</div><h3>How to use AI Workflow Studio</h3></div>
       <div class="modal-body help-body">
-        <p>Turn a plain-language idea into a senior-SA-grade <b>diagram</b>, a folder of bid docs into a priced <b>WBS + cost estimation</b>, or a folder of RFP docs into a full <b>technical proposal .docx</b> — analysed, confirmed by you at a gate, generated, versioned, and exportable. The steps below apply to both (a proposal analyses a document folder instead of a prompt, and produces a .docx).</p>
+        <p>Turn a plain-language idea into a senior-SA-grade <b>diagram</b>, a folder of RFP docs into a full <b>technical proposal .docx</b>, or a folder of bid docs into a priced <b>WBS + cost estimation</b>. Every type follows the same path — analyse, confirm at a gate, generate, version, export — and each step below says what that means for the type you picked.</p>
         <div class="help-steps">${stepHTML}</div>
         <div class="help-tips"><div class="hs-t">Good to know</div><ul>${tips.map(t => `<li>${t}</li>`).join('')}</ul></div>
       </div>

@@ -7,12 +7,12 @@ the repo updates every profile immediately).
 
 ![AI Workflow Studio — the shared web app driving the skills](webapp/static/sample.png)
 
-*AI Workflow Studio — the shared web app: pick a workspace type (diagram or technical proposal), refine, confirm at a gate, generate, keep version history, and export.*
+*AI Workflow Studio — the shared web app: pick a workspace type (diagram, technical proposal, or WBS + cost), refine, confirm at a gate, generate, keep version history, and export.*
 
 ## Install (once per machine)
 
-One command sets up **everything** — deploys both skills into every Claude profile and
-prepares the web app (venv + dependencies + Graphviz):
+One command sets up **everything** — deploys every skill in this repo into every Claude
+profile and prepares the web app (venv + dependencies + Graphviz):
 
 - **Windows:** double-click **`install.bat`** (or `py -3 install.py`)
 - **macOS / Linux:** `./install.sh` (or `python3 install.py`)
@@ -24,8 +24,8 @@ Then start the web app anytime:
 
 - **Windows:** **`run.bat`**   ·   **macOS / Linux:** `./run.sh`   (→ http://127.0.0.1:8000)
 
-Skills also work directly in any Claude Code session: `/linhpham-diagram` and
-`/linhpham-technicalproposal`.
+Skills also work directly in any Claude Code session: `/linhpham-diagram`,
+`/linhpham-technicalproposal` and `/linhpham-wbs`.
 
 ## Skills
 
@@ -55,16 +55,17 @@ Deploy: `cd wbs-estimate && python tools/deploy.py`
 
 ### `webapp/` — the shared web app ("AI Workflow Studio")
 A local browser UI over the skills. When you create a workspace you pick its type
-(**diagram** or **technical proposal**), then: refine/analyze → confirm at a gate →
-generate → version history/compare → export. It drives **both** skills head-less via
-the `claude` CLI, and sits at the top level (beside both skills) so future skills can
-plug into the same UI.
+(**diagram**, **technical proposal**, or **WBS + cost** — which also asks whether to fill
+a client-supplied WBS or author one), then: refine/analyze → confirm at a gate →
+generate → version history/compare → export. It drives the skills head-less via the
+`claude` CLI, and sits at the top level (beside them) so a new skill plugs into the
+same UI.
 
 Run: `python webapp/launch.py` (or `webapp/run.bat` / `webapp/run.sh`) → http://127.0.0.1:8000
 
 ## How it learns (gets smarter over time)
 
-Both skills **self-improve after every run** — not by swapping in a bigger model, but by
+Every skill here **self-improves after each run** — not by swapping in a bigger model, but by
 turning each mistake into a rule that is enforced automatically the next time.
 
 **The mechanism (each skill owns it):**
@@ -83,6 +84,8 @@ turning each mistake into a rule that is enforced automatically the next time.
 - **Technical proposal** — the skill's final phase appends a lesson and promotes the rule.
 - **Diagram** — after a render, a short self-check reviews the output against the skill's own
   senior-SA quality rubric and records/promotes anything reusable.
+- **WBS + cost** — the reporting phase records what the estimate got wrong and what the verifier
+  had to catch, so the next estimate starts from real figures rather than from ranges.
 - **Web app** — it never writes lessons itself; it only lets each skill run its *own*
   self-learning. Learning always happens **through the skill**, so the skill (not some separate
   store) is what gets smarter — on every machine the repo is deployed to.
@@ -108,11 +111,14 @@ accurate — the intelligence is in the enforced rules, not in re-reading the lo
 ├─ technical-proposal/   # /linhpham-technicalproposal skill + tools + templates
 ├─ diagram/              # /linhpham-diagram skill + tools
 ├─ wbs-estimate/         # /linhpham-wbs skill + tools
-└─ webapp/               # "AI Workflow Studio" — shared local web app over the skills
+├─ webapp/               # "AI Workflow Studio" — shared local web app over the skills
+└─ tools/                # repo-wide gates (check_skill_parity.py)
 ```
 
 Each skill folder keeps its own `deploy.*`, `.gitignore`, and `LESSONS_LEARNED.md`,
 so the skills stay fully independent inside one repository.
 
-The web app currently drives the technical-proposal and diagram skills; `wbs-estimate`
-runs from Claude Code and is wired into the UI next.
+`tools/check_skill_parity.py` guards the boundary between them: skills that draw diagrams
+share their rendering scripts byte for byte, and the gate fails if an edit lands on one
+side only. That is not hypothetical — it happened, and for a day one skill drew worse
+arrows than the other with nothing to say so.

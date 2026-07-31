@@ -1,8 +1,11 @@
-# TechnicalProposal-WorkFlow
+# Technical Proposal — `/linhpham-technicalproposal`
 
 A Claude Code skill that turns a folder of RFP / brief / reference docs into a polished,
 SharePoint-Online-compatible **High-Level Technical Proposal .docx** — with senior-SA-grade
 architecture diagrams.
+
+This skill lives inside the [AI Workflow Studio](../README.md) monorepo, alongside sibling skills
+such as `/linhpham-diagram` and `/linhpham-wbs`, and a shared web app that drives them.
 
 ```
 /linhpham-technicalproposal <projectname>
@@ -15,10 +18,16 @@ and SharePoint compatibility before delivery.
 
 ## Install
 
+Most people should install the whole monorepo in one step, which deploys this skill
+along with the other two and prepares the web app — see the
+[root README](../README.md#install-once-per-machine).
+
+To deploy **only this skill**:
+
 ```bash
 # 1. Clone anywhere on your machine.
-git clone https://github.com/linhphamSTS/TechnicalProposal-WorkFlow.git
-cd TechnicalProposal-WorkFlow
+git clone https://github.com/linhphamSTS/AI-Workflow-Studio.git
+cd AI-Workflow-Studio/technical-proposal
 
 # 2. Run the platform-appropriate deploy script.
 #    Windows:  double-click deploy.bat
@@ -47,26 +56,38 @@ git pull
 # or if a new Claude profile was added since the last deploy.
 ```
 
-## Repo layout
+## Folder layout
 
 ```
-TechnicalProposal-WorkFlow/
+technical-proposal/
 ├── skill/
 │   └── linhpham-technicalproposal/      # source of truth for the skill
 │       ├── SKILL.md
+│       ├── LESSONS_LEARNED.md           # self-learning diary; read at phase 0, appended at phase 6
 │       ├── prompts/                     # phase 0..6 instruction files
-│       ├── scripts/                     # python helpers (build, diagram, review)
+│       ├── scripts/                     # renderers + build + review (see below)
 │       ├── templates/                   # proposal_template.docx
-│       └── assets/icons/                # 8 icon packs (SVG; PNG generated at deploy time)
+│       ├── assets/icons/                # 8 icon packs (ai aws azure container data gcp generic network)
+│       └── tools/fetch_tech_logos.mjs   # node: fetch technology logos for the stack tables
 ├── tools/
 │   ├── deploy.py                        # main cross-platform deploy
-│   ├── fetch_icons.py                   # (todo) download official icon sets
-│   └── prerender_icons.py               # (todo) SVG -> PNG @200/300 DPI
-├── docs/
+│   ├── fetch_icons.py                   # download official icon sets
+│   ├── prerender_icons.py               # SVG -> PNG @200/300 DPI
+│   ├── strip_template.py                # turn a delivered .docx back into a reusable template
+│   ├── finalize_template.py             # apply the template's SharePoint fixes
+│   ├── self_test.py                     # smoke-test the skill end to end
+│   └── verify_all.py, verify_workflow.py
 ├── deploy.bat                           # Windows wrapper
 ├── deploy.command                       # macOS double-clickable wrapper
 └── deploy.sh                            # Linux wrapper
 ```
+
+The rendering scripts (`build_cloud`, `build_graph`, `build_sequence`, `cloud_specs`,
+`diagram_check`, `diagram_templates`, `diagrams_runtime`, `drawio_export`, `svg_util`,
+`build_diagram`) are **shared byte for byte** with the `/linhpham-diagram` skill and are
+gated by `tools/check_skill_parity.py` at the repo root. Edit one, copy it to the other in
+the same change, then run the gate. The document scripts (`build_docx`, `format_reviewer`,
+`check_consistency`, `auto_fix`, `render_pages`) belong to this skill alone.
 
 ## License
 
