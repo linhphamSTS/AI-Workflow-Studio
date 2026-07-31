@@ -73,7 +73,7 @@ def find_claude_profiles(verbose: bool = True) -> list[Path]:
 
 def remove_existing(dst: Path) -> bool:
     """Remove an existing file/dir/junction at dst. Returns True if removed or absent."""
-    if not dst.exists() and not dst.is_symlink():
+    if not os.path.lexists(dst):          # lexists: true for a dangling junction too
         return True
     try:
         if dst.is_symlink() or dst.is_file():
@@ -107,7 +107,11 @@ def create_link(src: Path, dst: Path, mode: str) -> bool:
     """Create dst -> src. mode is 'link' (junction/symlink) or 'copy'."""
     dst.parent.mkdir(parents=True, exist_ok=True)
 
-    if dst.exists() or dst.is_symlink():
+    # os.path.lexists, NOT dst.exists(): a junction whose target is gone reports False for
+    # exists() and False for is_symlink() on Windows, so the old guard skipped removal and then
+    # mklink failed because the name was already taken. A repo that moved, or a deploy that once
+    # pointed at a temporary directory, left the skill permanently unrepairable by re-running this.
+    if os.path.lexists(dst):
         if already_linked(dst, src):
             print(f"    already linked correctly")
             return True

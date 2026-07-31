@@ -226,14 +226,33 @@ finally {
     }
     Restore-Shortcuts
 
-    # Prove the isolation held rather than assuming it: no real profile may point at the sandbox.
+    # Prove the isolation held rather than assuming it, and REPAIR it if it did not.
+    #
+    # Matched on the sandbox's LEAF NAME, not its full path. $env:TEMP hands back an 8.3 short
+    # name on this machine while a junction target is stored long, so "*$sandbox*" never matched
+    # and this check stayed silent through a real leak: every one of the six live skill junctions
+    # ended up pointing into a sandbox that was then deleted, and the skills stopped working.
+    # Same 8.3 trap as the shortcut comparison, in a check whose whole job was to catch this.
+    $leaf = Split-Path -Leaf $sandbox
+    $leaked = @()
     foreach ($p in (Get-ChildItem $realHome -Directory -Filter '.claude*' -ErrorAction SilentlyContinue)) {
-        foreach ($sk in (Get-ChildItem (Join-Path $p.FullName 'skills') -Directory -ErrorAction SilentlyContinue)) {
-            $target = (Get-Item $sk.FullName).Target
-            if ($target -and "$target" -like "*$sandbox*") {
-                Write-Host "  LEAK: $($p.Name)/$($sk.Name) points into the sandbox" -ForegroundColor Red
-            }
+        foreach ($sk in (Get-ChildItem (Join-Path $p.FullName 'skills') -Force -ErrorAction SilentlyContinue)) {
+            $target = (Get-Item -LiteralPath $sk.FullName -Force -ErrorAction SilentlyContinue).Target
+            if ($target -and "$target" -like "*$leaf*") { $leaked += "$($p.Name)/$($sk.Name)" }
         }
+    }
+    if ($leaked.Count) {
+        Write-Host ""
+        Write-Host "  LEAK: these REAL skill links point into the sandbox: $($leaked -join ', ')" -ForegroundColor Red
+        Write-Host "  Repairing them from the repo ..." -ForegroundColor Yellow
+        $repo = Split-Path -Parent $PSScriptRoot
+        foreach ($l in $leaked) {
+            $full = Join-Path $realHome ($l -replace '/', '\skills\')
+            cmd /c rmdir "$full" 2>&1 | Out-Null      # a dangling junction has to be removed first
+        }
+        & (Get-Command python).Source (Join-Path $repo 'install.py') 2>&1 | Out-Null
+        Write-Host "  Repaired. This is a FAILURE of the isolation, not a warning." -ForegroundColor Red
+        $script:leakDetected = $true
     }
     $pathAfter = [Environment]::GetEnvironmentVariable('Path', 'User')
     if ($pathAfter -ne $pathBefore) {
@@ -315,6 +334,10 @@ if (Test-Path (Join-Path $installTo 'bin\aiws.cmd')) {
 
 # measured inside the try block: auto-update, and the start/stop round trip
 foreach ($r in $collected) { Check $r.Name $r.Ok ($r.Detail -replace "`n", ' | ') }
+
+# The suite must not damage the machine it runs on. This is a check, not a footnote.
+Check 'no real skill link points into the sandbox' (-not $leakDetected) `
+    'the isolation failed; the links were repaired but the harness is at fault'
 
 # the version stamp, and the update commands built on it
 $stamp = Join-Path $installTo '.aiws-version'
