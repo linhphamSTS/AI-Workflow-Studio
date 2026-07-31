@@ -32,16 +32,20 @@ self-learning, so what improves is the skill, on every machine it is deployed to
 
 ## Run — one command, self-installing
 
-Move the repo to any machine and just launch it. The first run creates its own
-virtual-env, installs every dependency, downloads a portable Graphviz if needed,
-starts the server, and opens your browser. Nothing to set up by hand.
+On a machine that has nothing at all, use the repo-level installer described in the
+[root README](../README.md#install--one-command-nothing-else-needed): it also fetches
+Python, deploys the skills and puts a Desktop icon in place.
+
+If the repo is already here, just launch it. The first run creates its own virtual-env,
+installs every dependency, downloads a portable Graphviz if needed, starts the server, and
+opens your browser. Nothing to set up by hand.
 
 - **Windows:** double-click **`webapp/run.bat`** (or `py -3 webapp/launch.py`)
 - **macOS / Linux:** `./webapp/run.sh` (or `python3 webapp/launch.py`)
 
-Only prerequisite: **Python 3.10+** on the machine. (The `claude` CLI is needed
-for the *Refine* step only — install Claude Code and run `claude` once to log in;
-Generate / Preview / Export work without it.)
+Only prerequisite: **Python 3.10+** on the machine. The `claude` CLI has to be installed and
+signed in for anything to be analysed or generated; if it is not, the app says so on arrival
+with the exact command for your platform, and re-checks without a reload.
 
 Works on **Windows, macOS and Linux** — the launcher builds a per-OS venv and the
 skill auto-installs Graphviz (portable zip on Windows; `brew`/`apt` on macOS/Linux,

@@ -9,20 +9,48 @@ the repo updates every profile immediately).
 
 *AI Workflow Studio — the shared web app: pick a workspace type (diagram, technical proposal, or WBS + cost), refine, confirm at a gate, generate, keep version history, and export.*
 
-## Install (once per machine)
+## Install — one command, nothing else needed
 
-One command sets up **everything** — deploys every skill in this repo into every Claude
-profile and prepares the web app (venv + dependencies + Graphviz):
+**Windows** (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/linhphamSTS/AI-Workflow-Studio/main/get.ps1 | iex
+```
+
+**macOS / Linux:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/linhphamSTS/AI-Workflow-Studio/main/get.sh | bash
+```
+
+That is the whole thing. It downloads the repo, **fetches a private Python if the machine
+has none** (through `uv`, into `uv`'s own directory, leaving any system Python alone),
+builds the web app's virtual-env, installs the dependencies, gets Graphviz, deploys every
+skill into every Claude Code profile, offers to install the Claude Code CLI when it is
+missing, puts an **AI Workflow Studio** icon on your Desktop, and adds an `aiws` command.
+No Administrator or `sudo`, nothing installed system-wide. Budget a few minutes and about
+200 MB on a first run.
+
+**The one step that cannot be automated is signing in**, because it opens a browser. If you
+are not signed in, the installer stops and prints `claude auth login`, and the web app shows
+the same thing with a Copy button and a re-check.
+
+Then start it from the **Desktop icon**, or run `aiws` in a terminal (→ http://127.0.0.1:8000).
+
+Re-running the installer updates an existing install in place. Your workspaces are never
+touched.
+
+<details>
+<summary>Already have the repo cloned?</summary>
+
+`install.py` does everything except downloading: deploys every skill and prepares the web
+app. It needs Python 3.10+ to already be present.
 
 - **Windows:** double-click **`install.bat`** (or `py -3 install.py`)
 - **macOS / Linux:** `./install.sh` (or `python3 install.py`)
 
-Only prerequisite: **Python 3.10+**. (The `claude` CLI is needed at run time for the
-Refine / Analyze / Generate steps; the installer reports whether it's signed in.)
-
-Then start the web app anytime:
-
-- **Windows:** **`run.bat`**   ·   **macOS / Linux:** `./run.sh`   (→ http://127.0.0.1:8000)
+Start the app with **`run.bat`** / `./run.sh`.
+</details>
 
 Skills also work directly in any Claude Code session: `/linhpham-diagram`,
 `/linhpham-technicalproposal` and `/linhpham-wbs`.
