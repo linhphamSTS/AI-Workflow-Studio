@@ -37,8 +37,35 @@ the same thing with a Copy button and a re-check.
 
 Then start it from the **Desktop icon**, or run `aiws` in a terminal (→ http://127.0.0.1:8000).
 
-Re-running the installer updates an existing install in place. Your workspaces are never
-touched.
+### Updating
+
+```
+aiws update     # pull the latest code and re-deploy every skill
+aiws version    # what is installed, and whether anything newer exists
+```
+
+`aiws` also **checks for a new version each time it starts** and applies it before the server
+comes up, never while it is running. Skip that with `AIWS_NO_UPDATE=1`.
+
+An update mirrors the new files in and **never deletes `.git`, `webapp/workspaces` or
+`webapp/.venv`** — so generated work survives, and pointing the installer at a clone cannot
+destroy its history. If the install directory *is* a git working copy, auto-update stands
+down entirely and tells you to use `git pull`, because mirroring GitHub over uncommitted work
+is not an update, it is data loss.
+
+Adding a skill needs no change here: `install.py` discovers any folder that ships
+`tools/deploy.py` and a `skill/<name>/`, so a new one is deployed by the next update.
+
+<details>
+<summary>Working in a clone and just want the icon and the command?</summary>
+
+```powershell
+.\get.ps1 -Here      # macOS / Linux:  ./get.sh --here
+```
+
+Wires up `aiws` and the Desktop icon against the folder the script is in, with no download
+and no second copy.
+</details>
 
 <details>
 <summary>Already have the repo cloned?</summary>

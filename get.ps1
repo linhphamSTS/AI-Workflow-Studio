@@ -36,7 +36,11 @@
 param(
     [switch]$Yes,
     [switch]$NoStart,
-    [string]$Dir
+    [string]$Dir,
+    # Treat the directory this script sits in AS the install and skip the download. For a
+    # developer working in a clone: it wires up the aiws command and the Desktop icon without
+    # mirroring GitHub over the work in progress.
+    [switch]$Here
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,12 +55,17 @@ if (-not $Dir -and $env:AIWS_DIR) { $Dir = $env:AIWS_DIR }
 $Repo      = 'linhphamSTS/AI-Workflow-Studio'
 $Branch    = 'main'
 $AppName   = 'AI Workflow Studio'
-# Directories that belong to the USER, not to the repo. An update must never touch these:
-# workspaces hold generated work that exists nowhere else, and .venv is expensive to rebuild.
-$Keep      = @('workspaces', '.venv')
+$BinDir    = $null
+# Paths, relative to the install directory, that an update must never delete. /MIR removes
+# anything the archive does not contain, so everything the USER owns has to be named here:
+#   .git              - a GitHub archive has no .git, so installing over a CLONE would
+#                       otherwise delete its entire history. Destroying a repository is not
+#                       an acceptable outcome of pointing -Dir at the wrong place.
+#   webapp/workspaces - generated work that exists nowhere else.
+#   webapp/.venv      - expensive to rebuild, and not in the archive either.
+$Keep      = @('.git', 'webapp\workspaces', 'webapp\.venv')
 
-if (-not $Dir) { $Dir = Join-Path $env:LOCALAPPDATA 'AI-Workflow-Studio' }
-$BinDir = Join-Path $Dir 'bin'
+if ($env:AIWS_HERE -eq '1') { $Here = $true }
 
 $script:StepNo = 0
 function Write-Step($text) {
@@ -88,10 +97,18 @@ function Confirm-Action($question) {
     }
 }
 
+# Resolved here, below the helpers, because -Here can fail and Fail is defined above.
+if ($Here) {
+    if (-not $PSScriptRoot) { Fail '-Here needs this script saved to disk. Save it, or pass -Dir.' }
+    $Dir = $PSScriptRoot
+}
+if (-not $Dir) { $Dir = Join-Path $env:LOCALAPPDATA 'AI-Workflow-Studio' }
+$BinDir = Join-Path $Dir 'bin'
+
 Write-Host ''
 Write-Host "  $AppName" -ForegroundColor White
 Write-Host '  SA-grade deliverables, from a prompt' -ForegroundColor DarkGray
-Write-Host "  Installing into $Dir" -ForegroundColor DarkGray
+Write-Host "  $(if ($Here) { 'Wiring up' } else { 'Installing into' }) $Dir" -ForegroundColor DarkGray
 
 # Some icon files in this repo sit ~140 characters deep on their own. Copying is handled by
 # robocopy, which copes, but pip building the virtual-env underneath a long prefix does not
@@ -103,7 +120,29 @@ if ($Dir.Length -gt 90) {
 }
 
 # ---------------------------------------------------------------- 1. get the code
+if ($Here) {
+    Write-Step 'Using the code already in this folder'
+    if (-not (Test-Path (Join-Path $Dir 'install.py'))) { Fail "$Dir does not look like the repo (no install.py)." }
+    Write-Ok 'Skipping the download.'
+} else {
+
 Write-Step 'Downloading the repository'
+
+# Record which commit this install came from, so `aiws update` can tell whether there is
+# anything to do without downloading 65 MB to find out.
+$headSha = $null
+try {
+    # Two PowerShell 5.1 details, both of which silently broke this the first time:
+    # User-Agent is a restricted header and must be its own parameter, not a -Headers entry;
+    # and .Content comes back as a BYTE ARRAY whenever the content type is not one PS treats
+    # as text, which application/vnd.github.sha is not. Calling .Trim() on it just throws.
+    $resp = Invoke-WebRequest -Uri "https://api.github.com/repos/$Repo/commits/$Branch" `
+        -Headers @{ 'Accept' = 'application/vnd.github.sha' } `
+        -UserAgent 'aiws-installer' -UseBasicParsing
+    $raw = if ($resp.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($resp.Content) } else { [string]$resp.Content }
+    if ($raw.Trim() -match '^[0-9a-f]{40}$') { $headSha = $raw.Trim() }
+} catch { }
+if (-not $headSha) { Write-Info 'Could not read the current commit; "aiws update" will still work, just less cheaply.' }
 
 $isUpdate = Test-Path (Join-Path $Dir 'install.py')
 $staging  = Join-Path ([IO.Path]::GetTempPath()) ("aiws-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -131,16 +170,22 @@ try {
     # repo files and emphatically wrong for the user's own data, hence /XD. On a first install
     # the destination is empty, so the same command serves both cases.
     $xd = @()
-    foreach ($k in $Keep) { $xd += '/XD'; $xd += (Join-Path (Join-Path $Dir 'webapp') $k) }
+    foreach ($k in $Keep) { $xd += '/XD'; $xd += (Join-Path $Dir $k) }
     $null = & robocopy $src.FullName $Dir /MIR /NFL /NDL /NJH /NJS /NP /R:2 /W:1 @xd
     $rc = $LASTEXITCODE
     $global:LASTEXITCODE = 0          # robocopy uses 0-7 for success; leaving it set trips later checks
     if ($rc -ge 8) { Fail "copying the files failed (robocopy exit $rc)." }
+    if ($headSha) {
+        @{ sha = $headSha; branch = $Branch; installed = (Get-Date).ToString('s') } |
+            ConvertTo-Json | Set-Content -Path (Join-Path $Dir '.aiws-version') -Encoding ASCII
+    }
     Write-Ok ($(if ($isUpdate) { 'Updated.' } else { 'Downloaded.' }))
 }
 finally {
     Remove-Item -Path $staging -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+}   # end of the download branch skipped by -Here
 
 # ---------------------------------------------------------------- 2. a working Python
 Write-Step 'Looking for Python 3.10 or newer'
@@ -244,12 +289,28 @@ if ($claude) {
 Write-Step 'Adding the aiws command'
 
 New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
-# The interpreter is pinned rather than looked up at run time: when uv supplied the Python
-# it is deliberately not on PATH, so a launcher that searched for one would find nothing.
+
+# The interpreter is pinned rather than looked up at run time: when uv supplied the Python it
+# is deliberately not on PATH, so a launcher that searched for one would find nothing.
+#
+# Prefer the virtual-env interpreter that step 3 just built. It is an absolute path to one
+# exact Python, whereas the bootstrap interpreter may be the "py" launcher, which selects a
+# version from its own rules and needs -3 to be trusted. launch.py re-execs into this venv
+# anyway, so naming it directly removes a whole class of "which Python did that pick" bug.
+$venvPy = Join-Path $Dir 'webapp\.venv\Scripts\python.exe'
+if (Test-Path $venvPy) {
+    $runCmd = """$venvPy"""
+} else {
+    # No venv (step 3 failed): fall back to the bootstrap interpreter, WITH the arguments the
+    # probe used. Dropping them turns "py -3" into "py", which is not the same interpreter.
+    $runCmd = (@("""$py""") + $pyArgs) -join ' '
+}
+# Calls tools/aiws.py rather than launch.py directly: that is where `aiws update`, the
+# version report and the pre-start update check live, shared with the macOS and Linux launcher.
 $launcher = @"
 @echo off
 REM Start $AppName. Generated by get.ps1 - re-run the installer to regenerate.
-"$py" "$Dir\webapp\launch.py" %*
+$runCmd "$Dir\tools\aiws.py" %*
 "@
 Set-Content -Path (Join-Path $BinDir 'aiws.cmd') -Value $launcher -Encoding ASCII
 
@@ -314,6 +375,8 @@ Write-Host ('  ' + ('-' * 62)) -ForegroundColor DarkGray
 Write-Host ''
 Write-Host '  Start the app:                 the "AI Workflow Studio" icon on your Desktop' -ForegroundColor White
 Write-Host '  Or from a terminal:            aiws' -ForegroundColor Gray
+Write-Host '  Update to the latest code:     aiws update      (also checked on every start)' -ForegroundColor Gray
+Write-Host '  What is installed:             aiws version' -ForegroundColor Gray
 Write-Host '  It opens at:                   http://127.0.0.1:8000' -ForegroundColor Gray
 Write-Host '  Skills in any Claude session:  /linhpham-diagram  /linhpham-technicalproposal  /linhpham-wbs' -ForegroundColor Gray
 Write-Host ''

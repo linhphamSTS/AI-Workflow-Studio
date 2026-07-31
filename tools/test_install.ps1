@@ -18,6 +18,16 @@ $installTo = Join-Path $sandbox 'app'
 $realHome = $env:USERPROFILE
 $pathBefore = [Environment]::GetEnvironmentVariable('Path', 'User')
 
+# GetFolderPath reads the shell folders from the registry, NOT $env:USERPROFILE, so the
+# installer's shortcut step writes to the REAL Desktop even under a redirected HOME. Same trap
+# as CLAUDE_CONFIG_DIR. Record what was there so anything this run creates can be removed
+# again, and so a shortcut the user already had is never deleted.
+$realDesktop = [Environment]::GetFolderPath('Desktop')
+$realStart = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Microsoft\Windows\Start Menu\Programs'
+$shortcuts = @((Join-Path $realDesktop 'AI Workflow Studio.lnk'), (Join-Path $realStart 'AI Workflow Studio.lnk'))
+$shortcutExisted = @{}
+foreach ($s in $shortcuts) { $shortcutExisted[$s] = Test-Path $s }
+
 Write-Host "sandbox   : $sandbox"
 Write-Host "real HOME : $realHome (will be hidden from the installer)"
 Write-Host ''
@@ -54,8 +64,23 @@ try {
     $realConfigDir = $env:CLAUDE_CONFIG_DIR
     Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
 
-    Write-Host "=== running get.ps1 ===" -ForegroundColor Magenta
-    & (Join-Path (Split-Path -Parent $PSScriptRoot) 'get.ps1') -Dir $installTo -NoStart
+    $get = Join-Path (Split-Path -Parent $PSScriptRoot) 'get.ps1'
+
+    Write-Host "=== pass 1: fresh install ===" -ForegroundColor Magenta
+    & $get -Dir $installTo -NoStart
+
+    # Seed the two things an update must not destroy, then install again over the top. .git is
+    # the one that matters: a GitHub archive has no .git, so a mirroring copy would wipe the
+    # history of anyone who pointed the installer at a clone.
+    New-Item -ItemType Directory -Path (Join-Path $installTo '.git') -Force | Out-Null
+    Set-Content -Path (Join-Path $installTo '.git\HEAD') -Value 'ref: refs/heads/main' -Encoding ASCII
+    $wsFile = Join-Path $installTo 'webapp\workspaces\demo\meta.json'
+    New-Item -ItemType Directory -Path (Split-Path $wsFile) -Force | Out-Null
+    Set-Content -Path $wsFile -Value '{"id":"demo"}' -Encoding ASCII
+
+    Write-Host ''
+    Write-Host "=== pass 2: update over the existing install ===" -ForegroundColor Magenta
+    & $get -Dir $installTo -NoStart
     $ok = $true
 }
 finally {
@@ -96,6 +121,32 @@ Check 'webapp present'         (Test-Path (Join-Path $installTo 'webapp\server.p
 Check 'venv built'             (Test-Path (Join-Path $installTo 'webapp\.venv\Scripts\python.exe')) 'no venv interpreter'
 Check 'aiws launcher written'  (Test-Path (Join-Path $installTo 'bin\aiws.cmd')) 'aiws.cmd missing'
 
+# what the update pass must have preserved
+Check 'update keeps .git'      (Test-Path (Join-Path $installTo '.git\HEAD')) 'the mirror copy deleted a clone history'
+Check 'update keeps workspaces' (Test-Path (Join-Path $installTo 'webapp\workspaces\demo\meta.json')) 'generated work was deleted'
+Check 'update keeps the venv'  (Test-Path (Join-Path $installTo 'webapp\.venv\Scripts\python.exe')) 'the venv was deleted'
+
+# the shortcut step, checked against the REAL desktop because that is where it lands
+foreach ($s in $shortcuts) {
+    $name = if ($s -like "*Desktop*") { 'desktop shortcut' } else { 'start menu shortcut' }
+    Check "$name created" (Test-Path $s) "not found at $s"
+}
+$deskLnk = $shortcuts[0]
+if (Test-Path $deskLnk) {
+    $sc = (New-Object -ComObject WScript.Shell).CreateShortcut($deskLnk)
+    # Do not compare the two paths as strings. $env:TEMP hands back an 8.3 short name here, so
+    # the .cmd holds the SHORT spelling (written from -Dir verbatim) while Windows stores the
+    # LONG one in the .lnk, and neither Resolve-Path nor FileSystemObject expands the other.
+    # Compare what the shortcut actually opens instead: the file it points at must BE this
+    # install's launcher. That is the property worth asserting, and it cannot be fooled by
+    # spelling.
+    $mine = Join-Path $installTo 'bin\aiws.cmd'
+    $same = (Test-Path $sc.TargetPath) -and
+            ((Get-Content $sc.TargetPath -Raw) -eq (Get-Content $mine -Raw))
+    Check 'shortcut opens this install''s launcher' $same "points at $($sc.TargetPath)"
+    Check 'shortcut carries the app icon' ($sc.IconLocation -like '*aiws.ico*') "icon is $($sc.IconLocation)"
+}
+
 $skills = @('linhpham-diagram', 'linhpham-technicalproposal', 'linhpham-wbs')
 foreach ($s in $skills) {
     $link = Join-Path $prof "skills\$s"
@@ -105,9 +156,41 @@ foreach ($s in $skills) {
 # the launcher must point at the sandbox, with a real interpreter
 if (Test-Path (Join-Path $installTo 'bin\aiws.cmd')) {
     $lc = Get-Content (Join-Path $installTo 'bin\aiws.cmd') -Raw
-    Check 'launcher targets this install' ($lc -like "*$installTo*") 'wrong path in aiws.cmd'
-    $exe = ([regex]'"([^"]+python[^"]*)"').Match($lc)
-    Check 'launcher pins a real interpreter' ($exe.Success -and (Test-Path $exe.Groups[1].Value)) 'interpreter path not resolvable'
+    # $env:TEMP hands back the 8.3 short form on this machine while the file holds the long
+    # one, so compare resolved paths. Comparing the strings reports a failure that is not real.
+    $longInstall = (Resolve-Path $installTo).Path
+    Check 'launcher targets this install' ($lc -like "*$longInstall*") 'wrong path in aiws.cmd'
+
+    # Take the first quoted path on the command line, whatever it is called: it may be a venv
+    # python, a system python, or the py launcher, and hard-coding "python" missed py.exe.
+    $exe = ([regex]'(?m)^"([^"]+)"').Match($lc)
+    Check 'launcher pins a real interpreter' ($exe.Success -and (Test-Path $exe.Groups[1].Value)) `
+        "first quoted token is not an existing file: $($exe.Groups[1].Value)"
+    Check 'launcher uses the venv interpreter' ($exe.Groups[1].Value -like '*\.venv\Scripts\python.exe') `
+        "pinned $($exe.Groups[1].Value) instead of the venv python"
+    Check 'launcher goes through the aiws dispatcher' ($lc -like '*tools\aiws.py*') `
+        'calls launch.py directly, so update/version would not exist'
+}
+
+# the version stamp, and the update commands built on it
+$stamp = Join-Path $installTo '.aiws-version'
+Check 'version stamp written' (Test-Path $stamp) 'no .aiws-version, so update cannot tell if it is behind'
+if (Test-Path $stamp) {
+    $sha = (Get-Content $stamp -Raw | ConvertFrom-Json).sha
+    Check 'version stamp holds a commit' ($sha -match '^[0-9a-f]{40}$') "sha is '$sha'"
+}
+$vpy2 = Join-Path $installTo 'webapp\.venv\Scripts\python.exe'
+$disp = Join-Path $installTo 'tools\aiws.py'
+# Checked as its own condition, not folded into the if below: the first run of this suite
+# skipped the dispatcher tests in silence because the file was not in the archive yet, and a
+# launcher pointing at a file that does not exist had reported everything green.
+Check 'dispatcher present in the install' (Test-Path $disp) 'tools/aiws.py is missing, so aiws would fail to start'
+if ((Test-Path $vpy2) -and (Test-Path $disp)) {
+    $vout = (& $vpy2 $disp version 2>&1) -join "`n"
+    Check 'aiws version reports the install' ($vout -like "*$installTo*" -or $vout -like '*installed*') $vout
+    # pass 2 seeded a .git, so the updater must refuse to mirror over a working copy
+    $uout = (& $vpy2 $disp update 2>&1) -join "`n"
+    Check 'aiws update refuses to overwrite a git checkout' ($uout -like '*git working copy*') $uout
 }
 
 # the venv must actually be able to import what the app needs
@@ -117,8 +200,17 @@ if (Test-Path $vpy) {
     Check 'venv dependencies import' ($LASTEXITCODE -eq 0) 'an import failed'
 }
 
+# Put the desktop back the way it was. Leaving a shortcut that points into a sandbox about to
+# be deleted would be worse than never having tested the step.
+foreach ($s in $shortcuts) {
+    if (-not $shortcutExisted[$s] -and (Test-Path $s)) {
+        Remove-Item $s -Force -ErrorAction SilentlyContinue
+        Write-Host "  cleaned up $(Split-Path -Leaf $s) from $(Split-Path -Parent $s)" -ForegroundColor Gray
+    }
+}
+
 Write-Host ''
 if ($fails -eq 0 -and $ok) { Write-Host "  ALL CHECKS PASSED" -ForegroundColor Green }
 else { Write-Host "  $fails CHECK(S) FAILED" -ForegroundColor Red }
 Write-Host ''
-Write-Host "sandbox left at $sandbox for inspection"
+Write-Host "sandbox left at $sandbox - delete it when done"
