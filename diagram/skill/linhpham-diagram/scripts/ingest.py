@@ -90,15 +90,63 @@ def extract(p: Path) -> str:
     return ""
 
 
+def _classify(p: Path, root: Path) -> str:
+    """Sort one path into 'ingest', 'noise' (deliberately excluded) or 'unsupported'.
+
+    The three-way split matters because the caller must ADVERTISE the unsupported ones.
+    This script only extracts text formats, but the agent reading its digest is a full
+    Claude session that can read a .pptx, a .doc or a screenshot perfectly well. So a
+    silently-dropped file is not a capability limit, it is a lost pointer: the agent sees
+    "4 files ingested", assumes that is the input set, and never opens the slide deck
+    sitting next to them. Naming them converts a silent gap into an instruction.
+
+    The exclusions mirror the skill's own Phase 1 rule ("skip hidden files, Word lock
+    files, output/"). They lived only in the prompt before, so the web app — which
+    pre-builds the digest with this script and hands it to the agent — ingested a
+    `.internal/` folder of notes that a direct skill run would have skipped. A rule
+    stated in a prompt and not enforced in the code that runs first is not a rule.
+
+    Matching is done on the path RELATIVE to root: an absolute path may legitimately
+    sit under a folder called `build`, `bin` or `.claude`, and matching the full path
+    would silently ingest nothing at all from an otherwise valid project folder.
+    """
+    rel = p.relative_to(root).parts
+    if any(part in SKIP_DIRS for part in rel):
+        return "noise"
+    if any(part.startswith(".") for part in rel):          # hidden files and hidden dirs
+        return "noise"
+    if p.name.startswith("~$"):                            # Word/Excel lock files
+        return "noise"
+    return "ingest" if p.suffix.lower() in SUPPORTED else "unsupported"
+
+
 def ingest(root: Path, out: Path, max_chars: int = 20000):
-    files = []
+    files, unsupported = [], []
     for p in sorted(root.rglob("*")):
-        if p.is_dir() or any(part in SKIP_DIRS for part in p.parts):
+        if p.is_dir():
             continue
-        if p.suffix.lower() in SUPPORTED:
+        kind = _classify(p, root)
+        if kind == "ingest":
             files.append(p)
+        elif kind == "unsupported":
+            unsupported.append(p)
     sections = [f"# Ingested digest — {root.name}",
                 f"_{len(files)} file(s) ingested from `{root}`._", ""]
+    if unsupported:
+        # Same principle as the truncation notice below: say what is missing and where to
+        # get it, so nobody mistakes this digest for the complete input set.
+        sections += [
+            "## ⚠ Present in this folder but NOT extracted below",
+            "",
+            "This script extracts text formats only. The files below are real inputs it could",
+            "not read. **Open them yourself** with the right handler before you analyse:",
+            "`.doc` via LibreOffice, `.xls` via the spreadsheet reader, `.pptx` via python-pptx,",
+            "images with vision, `.zip` by extracting it first. Treating the digest as complete",
+            "would silently drop them.",
+            "",
+            *(f"- `{p.relative_to(root)}`" for p in unsupported),
+            "",
+        ]
     stats = []
     for p in files:
         rel = p.relative_to(root)
@@ -117,6 +165,10 @@ def ingest(root: Path, out: Path, max_chars: int = 20000):
                      f"open the original file for the rest")
         sections.append(f"## {rel}{trunc}\n\n{text or '_(no extractable text)_'}\n")
         stats.append((str(rel), f"{len(text)} chars"))
+    for p in unsupported:
+        # Surfaced on stdout as well as in the digest, so the web app's job log shows it
+        # too and a human can spot a missed input without opening the digest.
+        stats.append((str(p.relative_to(root)), "NOT EXTRACTED - open it yourself"))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(sections), encoding="utf-8")
     return files, stats, out
