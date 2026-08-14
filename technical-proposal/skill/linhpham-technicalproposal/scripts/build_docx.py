@@ -514,7 +514,7 @@ def _build_bullet_paragraph(text: str, *, is_first: bool = False):
     pPr.append(ind)
     p.append(pPr)
     # Single space between bullet glyph and text (was 2) — user flagged
-    # the gap as "bullet vs chữ xa nhau".
+    # the gap between the glyph and its text read as too wide.
     body_text = "●	" + _strip_manual_numbering(text)
     r = OxmlElement("w:r")
     t = OxmlElement("w:t")
@@ -781,8 +781,8 @@ def remove_heading_adjacent_blank_paragraphs(doc) -> int:
     """Delete empty 'spacer' paragraphs that sit directly next to a heading.
 
     The template peppers blank paragraphs around headings; combined with the
-    headings' own space-before/after they read as an extra blank line ("dư 1
-    dòng trắng" — e.g. between "1. INTRODUCTION" and "1.1 Executive Summary").
+    headings' own space-before/after they read as an extra blank line, for
+    example between "1. INTRODUCTION" and "1.1 Executive Summary".
     Heading space-before/after alone gives the correct, consistent rhythm, so
     these spacers are pure noise. Keeps image paragraphs and the section-final
     paragraph."""
@@ -857,7 +857,7 @@ def _looks_like_heading_text(text: str) -> bool:
     if the template forgot to apply the Heading 1/2/3 style. The proposal
     template carries these as plain paragraphs with hard-coded left_indent
     (480 / 960 / 1200 twentieths), so `pStyle.startswith("Heading")` misses
-    them — which is the root cause of the "2.1 lòi ra ngoài 2 nằm trong"
+    them, which is the root cause of a sub-heading sitting further left than
     defect."""
     return bool(_HEADING_TEXT_RE.match(text or ""))
 
@@ -866,7 +866,7 @@ def normalize_heading_indents(doc) -> int:
     """Pull every heading paragraph back to flush-left so that:
       - the auto-number / typed number anchor sits at column 0 (the page
         margin), and
-      - no heading sticks left of the body (the "2.1 lòi ra ngoài" defect),
+      - no heading sticks out to the left of the body text,
         and
       - all headings line up consistently rather than stair-stepping
         deeper for each level.
@@ -926,8 +926,8 @@ def ensure_caption_followed_by_gap(doc, min_pt: int = 12) -> int:
     immediately after has space-before >= min_pt. A caption table cannot
     carry trailing whitespace itself, so the next paragraph must own the
     gap — otherwise body text sits flush against the caption, which the
-    user has flagged as a layout defect ("text và title image vẫn còn quá
-    sát nhau").
+    reader has flagged as a layout defect: the body text sits too close to the
+    figure and its caption.
     """
     from docx.oxml import OxmlElement
     touched = 0
@@ -1025,8 +1025,8 @@ def patch_numbering_xml(out_path: Path) -> int:
     The proposal_template's numbering definition uses `lvlJc="right"` so the
     auto-numbers (1., 1.1., 1.1.1.) are right-aligned within their hanging
     gutter. Because "1.1." is wider than "1.", a right-aligned 1.1. starts
-    LEFT of where a right-aligned 1. starts — producing the "mục con nằm
-    ngoài mục cha" defect the user has flagged (page 4 of the rendered docx).
+    LEFT of where a right-aligned 1. starts, so a child heading renders further
+    out than its parent (seen on page 4 of the rendered docx).
     Left-aligning the numbers anchors them at the same left column.
     """
     tmp = out_path.with_suffix(".tmp.docx")
@@ -1266,7 +1266,7 @@ def _build_techstack_table(doc, items: list[dict], header_fill: str = "595959",
     for row in tbl.rows:
         row.cells[0].width = col0_w
         row.cells[1].width = col1_w
-        # Vertical-center every cell so logo + name sit centered (user feedback "logo chữ nằm giữa")
+        # Vertical-center every cell so the logo and the name sit centred together.
         for c in row.cells:
             c.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
@@ -1463,7 +1463,7 @@ def normalize_body_spacing(doc) -> int:
     """Clamp every BODY paragraph (non-heading, non-caption, non-image) to a
     consistent rhythm: SB=0pt, SA=6pt. The template carries a grab-bag of
     paragraph styles inherited from PMO34129 — some sit at SA=20pt, others
-    at SA=0 — producing the "chỗ thì trống nhiều chỗ thì gần" defect.
+    at SA=0, so the vertical gap varies from one part of the page to another.
 
     PRESERVES:
       - The first bullet after a Figure caption (it explicitly carries
@@ -1535,7 +1535,7 @@ def remove_empty_caption_tables(doc) -> int:
 
 def remove_trailing_empty_paragraphs(doc) -> int:
     """Delete empty paragraphs at the very END of the body so SharePoint / Word /
-    Office-365-online don't render a blank trailing page ("dư trang trắng").
+    Office-365-online do not render a blank page at the end of the document.
 
     Keeps the body's final `sectPr`, any paragraph that carries a section break
     in its `pPr`, and any paragraph holding an image or an explicit break. Only
@@ -1586,6 +1586,247 @@ def _collect_subheadings(diagrams: list, existing_anchor_text: str = "") -> list
                 continue  # already covered by the existing anchor heading
         out.append(title)
     return out
+
+
+_BULLET_GLYPHS = "●•▪◦‣⁃"     # ● • ▪ ◦ ‣ ⁃
+
+
+def _all_paragraphs(doc):
+    """Body paragraphs AND paragraphs inside table cells.
+
+    `doc.paragraphs` skips table cells. Every pass in this file that forgot that
+    has shipped a defect, so it is one helper now.
+    """
+    yield from doc.paragraphs
+    for tbl in doc.tables:
+        for row in tbl.rows:
+            for cell in row.cells:
+                yield from cell.paragraphs
+
+
+def _is_glyph_bullet(para) -> bool:
+    """A paragraph that OPENS with a bullet character and is not already a list item."""
+    pPr = para._p.find(qn("w:pPr"))
+    if pPr is not None and pPr.find(qn("w:numPr")) is not None:
+        return False
+    text = (para.text or "").lstrip()
+    return bool(text) and text[0] in _BULLET_GLYPHS
+
+
+def ensure_bullet_numbering(doc) -> int:
+    """Define a real bullet list in numbering.xml and return its numId.
+
+    WHY THIS EXISTS. The template ships a `numbering.xml` with exactly one definition,
+    `numId=1`, and that one drives the HEADING numbering (the "4.2.1" on Heading 6). There
+    is no bullet list defined anywhere in it. So every bullet this skill produced was a
+    `●` character typed into an ordinary paragraph with a manual hanging indent faked by
+    `w:ind`. It looks close enough in Word on a desktop and it is wrong everywhere else:
+    Word Online and SharePoint lay a fake hanging indent out differently, so the reader
+    had to select each list, remove the bullets and re-apply them, at which point Word
+    attached the list definition that was missing all along and the spacing came right.
+    That report is the whole reason for this function.
+
+    Reuses an existing bullet definition if the template ever gains one, so running this
+    twice cannot stack duplicates.
+    """
+    from docx.oxml import OxmlElement
+
+    numbering = doc.part.numbering_part.element
+
+    # Already have a bullet abstract definition? Reuse the num that points at it.
+    for abstract in numbering.findall(qn("w:abstractNum")):
+        lvl = abstract.find(qn("w:lvl"))
+        if lvl is None:
+            continue
+        fmt = lvl.find(qn("w:numFmt"))
+        if fmt is not None and fmt.get(qn("w:val")) == "bullet":
+            aid = abstract.get(qn("w:abstractNumId"))
+            for num in numbering.findall(qn("w:num")):
+                ref = num.find(qn("w:abstractNumId"))
+                if ref is not None and ref.get(qn("w:val")) == aid:
+                    return int(num.get(qn("w:numId")))
+
+    used_abstract = [int(a.get(qn("w:abstractNumId"))) for a in numbering.findall(qn("w:abstractNum"))]
+    used_num = [int(n.get(qn("w:numId"))) for n in numbering.findall(qn("w:num"))]
+    abstract_id = (max(used_abstract) + 1) if used_abstract else 0
+    num_id = (max(used_num) + 1) if used_num else 1
+
+    abstract = OxmlElement("w:abstractNum")
+    abstract.set(qn("w:abstractNumId"), str(abstract_id))
+    # Three levels is enough: the content never nests deeper, and defining the levels we
+    # do not use would only give Word somewhere to drift to.
+    for ilvl, (glyph, font, left, hanging) in enumerate([
+        ("", "Symbol",      280, 200),   # matches the indent the fake bullets used,
+        ("o",      "Courier New", 560, 200),   # so no line moves when the glyph becomes real
+        ("", "Wingdings",   840, 200),
+    ]):
+        lvl = OxmlElement("w:lvl")
+        lvl.set(qn("w:ilvl"), str(ilvl))
+        for tag, attr, val in [
+            ("w:start", "w:val", "1"),
+            ("w:numFmt", "w:val", "bullet"),
+            ("w:lvlText", "w:val", glyph),
+            ("w:lvlJc", "w:val", "left"),
+        ]:
+            el = OxmlElement(tag)
+            el.set(qn(attr), val)
+            lvl.append(el)
+        pPr = OxmlElement("w:pPr")
+        ind = OxmlElement("w:ind")
+        ind.set(qn("w:left"), str(left))
+        ind.set(qn("w:hanging"), str(hanging))
+        pPr.append(ind)
+        lvl.append(pPr)
+        rPr = OxmlElement("w:rPr")
+        rfonts = OxmlElement("w:rFonts")
+        rfonts.set(qn("w:ascii"), font)
+        rfonts.set(qn("w:hAnsi"), font)
+        rfonts.set(qn("w:hint"), "default")
+        rPr.append(rfonts)
+        lvl.append(rPr)
+        abstract.append(lvl)
+
+    # Schema order: every w:abstractNum precedes every w:num.
+    existing_nums = numbering.findall(qn("w:num"))
+    if existing_nums:
+        existing_nums[0].addprevious(abstract)
+    else:
+        numbering.append(abstract)
+
+    num = OxmlElement("w:num")
+    num.set(qn("w:numId"), str(num_id))
+    ref = OxmlElement("w:abstractNumId")
+    ref.set(qn("w:val"), str(abstract_id))
+    num.append(ref)
+    numbering.append(num)
+    return num_id
+
+
+def convert_glyph_bullets_to_real_lists(doc, num_id: int) -> int:
+    """Strip the typed glyph and make the paragraph a genuine Word list item.
+
+    The glyph is removed from the text because the list definition draws it now; leaving
+    both renders two bullets. The manual `w:ind` is removed as well, so indentation comes
+    from the numbering definition and is identical on every platform, which is the fix for
+    the SharePoint report.
+
+    A continuation paragraph (`**Solution:** ...` under a problem bullet) never opens with
+    a glyph, so it is untouched here and keeps the indent `normalize_bullet_indent` gave it.
+    """
+    from docx.oxml import OxmlElement
+
+    converted = 0
+    for para in _all_paragraphs(doc):
+        if not _is_glyph_bullet(para):
+            continue
+
+        # Remove the leading glyph plus the tab or spaces that follow it, from whichever
+        # run carries it. Editing run text keeps the run's formatting intact.
+        for run in para.runs:
+            if not (run.text or "").strip():
+                continue
+            stripped = run.text.lstrip()
+            if stripped and stripped[0] in _BULLET_GLYPHS:
+                lead = run.text[: len(run.text) - len(stripped)]
+                run.text = lead + stripped[1:].lstrip("\t ")
+            break
+        # A tab can also live in its own run; drop a now-leading one.
+        for run in para.runs:
+            if run.text == "\t":
+                run.text = ""
+                break
+            if (run.text or "").strip():
+                break
+
+        pPr = para._p.get_or_add_pPr()
+        ind = pPr.find(qn("w:ind"))
+        if ind is not None:
+            pPr.remove(ind)
+        numPr = OxmlElement("w:numPr")
+        ilvl = OxmlElement("w:ilvl"); ilvl.set(qn("w:val"), "0")
+        nid = OxmlElement("w:numId"); nid.set(qn("w:val"), str(num_id))
+        numPr.append(ilvl); numPr.append(nid)
+        # numPr belongs immediately after pStyle in the pPr schema order.
+        style = pPr.find(qn("w:pStyle"))
+        if style is not None:
+            style.addnext(numPr)
+        else:
+            pPr.insert(0, numPr)
+        converted += 1
+    return converted
+
+
+def normalize_bullet_spacing(doc, before_pt: float = 0, after_pt: float = 6) -> int:
+    """One space-before and one space-after for every list item in the document.
+
+    A delivered file carried SIX different spacing pairs across its bullets, including
+    eleven with none set at all: (0,6) on 117, (6,8) on 14, (2,4) on 13, nothing on 11,
+    (12,6) on 8 and (4,4) on 5. A bullet with 12pt before sitting next to one with 0
+    is twice the gap for no reason, and the gap visibly changes down the page. Each pass
+    that touches paragraphs had stamped its own value and none of them ran last.
+
+    Deliberately NARROW: list items only. The broad body-paragraph sweep that used to live
+    in `build()` was disabled because it regressed the caption-to-bullet gap, and that
+    lesson stands. Caption gaps, image paragraphs and headings are not touched here.
+    """
+    changed = 0
+    for para in _all_paragraphs(doc):
+        pPr = para._p.find(qn("w:pPr"))
+        if pPr is None or pPr.find(qn("w:numPr")) is None:
+            continue
+        if para.style.name.lower().startswith("heading"):
+            continue                      # the numbered headings are list items too
+        fmt = para.paragraph_format
+        want_before, want_after = Pt(before_pt), Pt(after_pt)
+        if fmt.space_before != want_before or fmt.space_after != want_after:
+            fmt.space_before = want_before
+            fmt.space_after = want_after
+            changed += 1
+    return changed
+
+
+def strip_typed_numbers_from_autonumbered_headings(doc) -> int:
+    """Remove a hand-typed section number from a heading that Word already numbers.
+
+    THE DEFECT THIS FIXES, reported on a v2 delivery. The template's `Testing Workflow`,
+    `Testing Scope`, `Testing Process` and `User Acceptance Testing` headings carry BOTH
+    `numPr(numId=1, ilvl=2)`, whose level format is `%1.%2.%3.`, AND a number typed into
+    the text. Word prints its own number and then the text, so the heading renders as
+    `3.5.1. 4.5.1 Testing Workflow`.
+
+    It hid for a long time because the two numbers agreed: while a SECURITY & DATA
+    PROTECTION section sat at 3, development management was 4 and both read `4.5.1`. Turn
+    that optional section off and development management becomes 3, the automatic number
+    becomes `3.5.1` and the typed one still says `4.5.1`. So the duplication was always
+    there and the section drop only made it visible, which is the recurring shape of a
+    hand-typed number going stale.
+
+    **Only strips where `numPr` is present.** `2.1.1 System Context` and the other injected
+    System Overview sub-headings have NO numbering of their own and their number IS the
+    typed text, so they must keep it. That distinction is the whole safety of this pass.
+    """
+    stripped = 0
+    for para in _all_paragraphs(doc):
+        if not (para.style.name or "").lower().startswith("heading"):
+            continue
+        pPr = para._p.find(qn("w:pPr"))
+        if pPr is None or pPr.find(qn("w:numPr")) is None:
+            continue                      # numbers itself by typing; leave it alone
+        text = (para.text or "").lstrip()
+        m = re.match(r"^\d+(?:\.\d+)*\.?\s+", text)
+        if not m:
+            continue
+        lead = m.group(0)
+        for run in para.runs:
+            if not (run.text or "").strip():
+                continue
+            body = run.text.lstrip()
+            if body.startswith(lead):
+                keep = run.text[: len(run.text) - len(body)] + body[len(lead):]
+                run.text = keep
+                stripped += 1
+            break
+    return stripped
 
 
 def apply_keep_with_next(doc) -> int:
@@ -1664,7 +1905,7 @@ def validate_template_image_headings(template: Path) -> None:
     collects entries BY STYLE NAME (``TOC \\t "Heading 1,1,...,Heading 6,6,"``)
     and by applied outline level (``\\u``). An image sitting in a Heading-styled
     paragraph — even an empty one — therefore becomes a TOC entry, so the image
-    gets pulled into the mục lục when Word/SharePoint updates fields. Figure and
+    gets pulled into the table of contents when Word/SharePoint updates fields. Figure and
     decorative images must live in Normal (non-Heading) paragraphs with direct
     centering/spacing; skill-inserted diagrams already do, which is why only
     template-embedded images were ever affected.
@@ -1832,17 +2073,22 @@ def build(template: Path, replacements: dict, diagrams: list, out: Path) -> None
 
     # 6a-ii. Remove blank 'spacer' paragraphs adjacent to headings so the
     #        headings' own space-before/after controls the rhythm — kills the
-    #        "dư 1 dòng trắng" gap between e.g. '1.' and '1.1'.
+    #        extra blank-line gap between, for example, '1.' and '1.1'.
     n_blank = remove_heading_adjacent_blank_paragraphs(doc)
     print(f"Heading-adjacent blank paragraphs removed: {n_blank}")
+
+    # 6a-iii. A heading that Word numbers must not ALSO carry a typed number.
+    n_dup = strip_typed_numbers_from_autonumbered_headings(doc)
+    if n_dup:
+        print(f"Duplicate typed heading numbers stripped: {n_dup}")
 
     # 6b. Bump heading space-before/after so section transitions are visible.
     n_sp = boost_heading_spacing(doc)
     print(f"Heading spacing boosted: {n_sp}")
 
     # 6b-ii. Keep headings/images with the block they introduce — stops a
-    #        heading orphaned at page bottom (the main "nhảy trang / khoảng
-    #        trống không đáng" cause).
+    #        heading orphaned at a page bottom, the main cause of an unwanted
+    #        page break and the white space it leaves behind.
     n_kwn = apply_keep_with_next(doc)
     print(f"Keep-with-next applied: {n_kwn}")
 
@@ -1873,6 +2119,25 @@ def build(template: Path, replacements: dict, diagrams: list, out: Path) -> None
     # 7. Save.
     bullets = normalize_bullet_indent(doc)
     print(f"Bullet indents normalized: {bullets}")
+
+    # 7a. Turn the typed glyph bullets into REAL Word list items, and give every
+    #     one of them the same spacing. See the two functions for why.
+    num_id = ensure_bullet_numbering(doc)
+    n_real = convert_glyph_bullets_to_real_lists(doc, num_id)
+    print(f"Glyph bullets converted to Word list items: {n_real} (numId={num_id})")
+    n_bsp = normalize_bullet_spacing(doc)
+    print(f"Bullet spacing normalized: {n_bsp}")
+
+    # 7b. The bullet pass above runs AFTER 6c and overwrites the 12pt gap that 6c put on
+    #     the first paragraph under a Figure caption, whenever that paragraph is a bullet.
+    #     That is precisely the caption-to-bullet regression which got the old broad
+    #     spacing sweep disabled at 6e, and it came straight back the first time this pass
+    #     ran: eight captions reported `caption_text_crush`. Re-assert the caption gap last
+    #     rather than teach the bullet pass about captions, so the rule lives in one place.
+    n_cap2 = ensure_caption_followed_by_gap(doc, min_pt=12)
+    if n_cap2:
+        print(f"Caption gap re-asserted after bullet spacing: {n_cap2}")
+
     doc.save(str(out))
 
     # 8. Final XML-level placeholder sweep — catches TOC cache, comments etc.

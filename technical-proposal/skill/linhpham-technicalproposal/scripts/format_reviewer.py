@@ -296,7 +296,7 @@ _BULLET_NUMBER_PATTERN = re.compile(
 def check_no_bullet_number_duplicates(docx_path: Path, report: Report) -> None:
     """Reject paragraphs whose text starts with "●  1. " / "●  Step 2 — " etc.
     Each one renders as both a bullet dot AND a manual number — visible to
-    the reader as a quality bug ("dấu chấm tròn + số trùng")."""
+    the reader as a quality bug: a round glyph and a number on the same line."""
     doc = Document(str(docx_path))
     bad = []
     for i, p in enumerate(doc.paragraphs):
@@ -347,7 +347,7 @@ def check_image_spacing(docx_path: Path, report: Report) -> None:
 def check_heading_indent_vs_body(docx_path: Path, report: Report) -> None:
     """Heading 3 / 4 / 5 / 6 must NOT be left-indented deeper than the
     surrounding body paragraphs. A heading sitting at L=36 while body sits
-    at L=0 reads as "title thụt vô sâu hơn text" — wrong visual hierarchy.
+    at L=0 makes the heading look indented deeper than its own body: wrong hierarchy.
     """
     doc = Document(str(docx_path))
     bad = []
@@ -478,7 +478,7 @@ def check_settings_flags_present(docx_path: Path, report: Report) -> None:
 def check_caption_followed_by_gap(docx_path: Path, report: Report) -> None:
     """For every 1x1 Figure caption table, the next paragraph must carry
     space-before >= 8pt. Otherwise body text sits flush against the
-    caption — the user-flagged "text và title image quá sát nhau" defect.
+    caption, which reads as body text crammed against the figure.
     """
     doc = Document(str(docx_path))
     body = doc.element.body
@@ -965,6 +965,127 @@ def check_uat_section_present(docx_path: Path, report: Report) -> None:
         report.pass_("uat_section_present")
 
 
+_BULLET_GLYPHS = "●•▪◦‣⁃"
+
+
+def _walk_paragraphs(doc):
+    yield from doc.paragraphs
+    for tbl in doc.tables:
+        for row in tbl.rows:
+            for cell in row.cells:
+                yield from cell.paragraphs
+
+
+def check_bullets_are_real_lists(docx_path: Path, report: Report) -> None:
+    """No bullet may be a glyph typed into an ordinary paragraph.
+
+    The client reported it from the other end: uploading to SharePoint, the bullets came
+    out wrong and the padding only became correct after selecting each list, removing the
+    bullets and applying them again. Measured on that delivery: **168 of 168 bullets had no
+    `numPr`** — a `●` character in a plain paragraph with a hanging indent faked by
+    `w:ind`. Word on a desktop renders the fake close enough; Word Online and SharePoint do
+    not, and re-applying the bullet by hand is the reader supplying the list definition the
+    file never had. The template ships no bullet definition at all, which is why the skill
+    faked them for so long; `build_docx.ensure_bullet_numbering` now writes one.
+
+    A blocker, not a warning: a whole document of fake bullets is a format defect the reader
+    has to repair by hand before the file can be sent on.
+    """
+    doc = Document(str(docx_path))
+    fake = []
+    for para in _walk_paragraphs(doc):
+        pPr = para._p.find(qn("w:pPr"))
+        if pPr is not None and pPr.find(qn("w:numPr")) is not None:
+            continue
+        text = (para.text or "").lstrip()
+        if text and text[0] in _BULLET_GLYPHS:
+            fake.append(text[:44])
+    if fake:
+        report.add(Issue(
+            "glyph_bullets_not_real_lists", "visual", "blocker", False,
+            f"{len(fake)} bullet(s) are a glyph typed into a plain paragraph, not a Word "
+            f"list item - SharePoint lays these out differently and the reader has to "
+            f"re-apply every list by hand",
+            detail="; ".join(fake[:6]),
+        ))
+    else:
+        report.pass_("bullets_are_real_lists")
+
+
+def check_bullet_spacing_uniform(docx_path: Path, report: Report) -> None:
+    """Every list item carries the same space-before and space-after.
+
+    A delivered file carried SIX different pairs across its bullets — (0,6) on 117, (6,8) on
+    14, (2,4) on 13, nothing at all on 11, (12,6) on 8 and (4,4) on 5 — because each pass
+    that touches paragraphs stamped its own value and none ran last. A bullet with 12pt
+    before beside one with 0 is twice the gap for no reason, so the spacing between bullets
+    visibly changes from one part of the document to another.
+
+    One exemption, and it is deliberate: the first bullet under a Figure caption is given a
+    larger space-before on purpose, so a SECOND distinct pair is allowed before this fires.
+    """
+    doc = Document(str(docx_path))
+    pairs = {}
+    for para in _walk_paragraphs(doc):
+        pPr = para._p.find(qn("w:pPr"))
+        if pPr is None or pPr.find(qn("w:numPr")) is None:
+            continue
+        if (para.style.name or "").lower().startswith("heading"):
+            continue                       # numbered headings are list items too
+        fmt = para.paragraph_format
+        key = (None if fmt.space_before is None else round(fmt.space_before.pt, 1),
+               None if fmt.space_after is None else round(fmt.space_after.pt, 1))
+        pairs[key] = pairs.get(key, 0) + 1
+    if not pairs:
+        report.pass_("bullet_spacing_uniform (no list items)")
+        return
+    if len(pairs) > 2:
+        shown = ", ".join(f"{k}x{v}" for k, v in sorted(pairs.items(), key=lambda kv: -kv[1])[:6])
+        report.add(Issue(
+            "bullet_spacing_inconsistent", "visual", "major", True,
+            f"list items carry {len(pairs)} different space-before/space-after pairs; "
+            f"the gap between bullets changes down the page for no reason",
+            detail=shown,
+        ))
+    else:
+        report.pass_("bullet_spacing_uniform")
+
+
+def check_heading_number_not_duplicated(docx_path: Path, report: Report) -> None:
+    """A heading Word already numbers must not also carry a typed number.
+
+    Reported as `3.5.1. 4.5.1 Testing Workflow`. Four template headings carry both
+    `numPr(ilvl=2)`, whose level format is `%1.%2.%3.`, and a number typed into the text, so
+    Word prints its own and then the text. It stayed invisible for as long as the two agreed:
+    with the optional SECURITY section present, development management was 4 and both read
+    `4.5.1`. Drop that section and the automatic number becomes 3 while the typed one does
+    not move, which is when a reader sees it.
+
+    Only headings that HAVE numbering are examined. `2.1.1 System Context` and the injected
+    System Overview sub-headings have none, so their number is legitimately part of the text.
+    """
+    doc = Document(str(docx_path))
+    bad = []
+    for para in _walk_paragraphs(doc):
+        if not (para.style.name or "").lower().startswith("heading"):
+            continue
+        pPr = para._p.find(qn("w:pPr"))
+        if pPr is None or pPr.find(qn("w:numPr")) is None:
+            continue
+        text = (para.text or "").strip()
+        if re.match(r"^\d+(?:\.\d+)*\.?\s+\S", text):
+            bad.append(text[:44])
+    if bad:
+        report.add(Issue(
+            "heading_number_duplicated", "visual", "blocker", False,
+            f"{len(bad)} heading(s) are numbered by Word AND carry a typed number, so the "
+            f"number prints twice and the two disagree as soon as a section is dropped",
+            detail="; ".join(bad[:6]),
+        ))
+    else:
+        report.pass_("heading_number_not_duplicated")
+
+
 CHECKS = [
     ("zip_integrity",                  check_zip_integrity),
     ("file_size",                      check_size),
@@ -997,6 +1118,12 @@ CHECKS = [
     # rather than behind a placeholder, precisely so no run can paraphrase them. A section
     # nothing generates is a section nothing notices going missing, hence the check.
     ("uat_section_present",            check_uat_section_present),
+    # Added 2026-08-11, all three from defects the CLIENT found in a delivered file while
+    # every existing check reported clean. Each one is cheap and runs on the assembled
+    # .docx, so `tools/verify_docx.py` can exercise them in seconds without the generate.
+    ("bullets_are_real_lists",         check_bullets_are_real_lists),
+    ("bullet_spacing_uniform",         check_bullet_spacing_uniform),
+    ("heading_number_not_duplicated",  check_heading_number_not_duplicated),
 ]
 
 

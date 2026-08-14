@@ -592,8 +592,7 @@ inventory as a traceability table:
 | 2 | <Target> Reference Architecture | always | "<peak capacity problem>" → <chosen compute>+autoscale+<read-replica strategy>. `<Target>` matches the chosen deployment from §2: AWS / Azure / GCP / On-Prem K8s / Hybrid / Edge / Docker-only / etc. |
 | 3 | <Partner> Anti-Corruption Layer | project | "<vendor coupling problem>" → retry/CB/bulkhead/DLQ |
 | 4 | <Business> Sequence | project | "<consistency / batch problem>" → idempotency-key + event-driven projection |
-| 5 | <Toolchain> CI/CD Pipeline | always | "<delivery cadence problem>" → <pipeline tool chosen for THIS bid> → <gitops / deploy mechanism> |
-| 6+ | <Other> diagram | project | If §1b surfaces a problem that needs its own diagram (AI agent topology if RAG; data pipeline lineage if ETL; tenant isolation if multi-tenant; security view if PCI/HIPAA/PDPL; etc.) |
+| 5+ | <Other> diagram | project | If §1b surfaces a problem that needs its own diagram (AI agent topology if RAG; data pipeline lineage if ETL; tenant isolation if multi-tenant; security view if PCI/HIPAA/PDPL; etc.) |
 
 The values above are placeholders. Replace with the actual problem and
 solution for THIS bid. Pipeline tool examples by context (illustrative
@@ -607,6 +606,17 @@ only — never default to the same one):
 
 A diagram that doesn't appear in this traceability table is decoration,
 not analysis. Decoration loses bids.
+
+**NEVER propose a CI/CD or build-pipeline diagram.** The template already owns a
+`CI / CD Pipeline` section, with its own heading and its own content, inside PROPOSED
+DEVELOPMENT MANAGEMENT. Every diagram in the inventory becomes its own numbered heading
+under System Overview (`2.1.x`), and `build_docx.py` has no mechanism to place a figure
+into a section the template already owns, so a pipeline diagram always produces a SECOND
+CI/CD section that overlaps the first on quality gates, artefact signing, promotion and
+rollback. Two runs shipped that duplicate before anyone said so. The pipeline TOOLCHAIN
+still belongs in the §2 stack table and in the template's own section; it does not need a
+figure. The same test applies to any other candidate: **if the template already has a
+section for it, the diagram inventory must not create one.**
 
 **Default pattern (proven on prior STS bids):**
 

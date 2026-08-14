@@ -183,7 +183,7 @@ def fix_image_text_crush(docx_path: Path) -> int:
 def fix_heading_deeper_than_body(docx_path: Path) -> int:
     """Zero out any positive left-indent on headings AND zero a hanging
     first_line_indent if the resulting position would push the auto-number
-    off the left page margin (the "2.1.x tràn ra ngoài" defect)."""
+    off the left page margin, so a numbered sub-heading overflows it."""
     doc = Document(str(docx_path))
     count = 0
     for p in doc.paragraphs:

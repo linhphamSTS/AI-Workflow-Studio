@@ -339,6 +339,66 @@ PNG, not by a check, so build the spec so they cannot happen:
    `build_cloud` writes `<slug>.lint.json` **only when there are defects**, and deletes a stale one,
    so a missing sidecar is the clean result, not a failed run.
 
+15. **The real page budget for a figure is 7.9in, not the 8.5in this prompt used to say or the
+   9.0in `diagram_check` enforces, and a figure over it lands ON the footer.** Measured on a
+   delivered PDF of `proposal_template.docx`: the header block starts the body at **2.12in** and the
+   footer's first line sits at **10.20in**, so a figure that begins at the top of a page has 7.98in of
+   room, and about **7.6in** if its caption is to sit with it rather than orphan onto the next page. An
+   8.36in `build_graph` flowchart therefore passed `diagram_check` (cap 9.0in), passed
+   `format_reviewer --strict` with 0 blockers, and rendered with its last node and its caption printed
+   over "Saigon Technology". **No check in the skill compares a figure to the footer**, so add the
+   measurement yourself: convert the assembled `.docx` to PDF and, per page, compare every
+   `page.get_image_info()` bbox bottom against 10.20in.
+   ```python
+   # in the run's own specs/, never in the skill
+   import fitz                                   # PyMuPDF
+   doc = fitz.open(pdf)                          # Word COM or LibreOffice, either is fine
+   for pno in range(doc.page_count):
+       for img in doc[pno].get_image_info():
+           r = img["bbox"]
+           if (r[3] - r[1]) / 72 > 2.0 and r[3] / 72 > 10.20:
+               print("figure on page", pno + 1, "overlaps the footer")
+   ```
+   **The cheap fix is `width_inches`, not a re-author.** `diagrams.json` carries a per-figure
+   `width_inches` that `build_docx.py` passes straight to the embed, and height scales with it:
+   `5.7` took the 8.36in flowchart to 7.33in and cost only 0.6pt of on-page text (5.2 to 4.6). Prefer
+   that over cutting a rank out of a correct diagram. Do the arithmetic while authoring:
+   `rendered_in = 6.5 * h_px / w_px` is what a 6.5in embed gives you, and anything over about 7.5
+   needs a narrower embed.
+
+16. **`build_graph`: an edge entering a ONE-NODE-WIDE cluster in `TB` always crosses that cluster's
+   header, and `edge_crosses_cluster_label` is a BLOCKER.** `check_layout_lint` promotes every entry
+   of `<slug>.lint.json` to a blocker, and Graphviz centres a cluster label across the top of the
+   cluster, so when the cluster is one node wide the incoming edge lands exactly where the text is.
+   Shortening the label does not save you: the crossing is at the centre, which is where a centred
+   label lives. Two remedies, both used on one run: **switch the figure to `LR`**, where the header
+   stays on top while edges enter from the left (this also fixed a 2-line header on a wide cluster),
+   or **drop that cluster and put the grouping in an explanation bullet**, which is what the lint
+   message itself advises. A cluster spanning three or more nodes usually survives in `TB`, because
+   the entry point falls outside the centred header box. Keep cluster labels to one line either way:
+   `wrap_label(limit=26)` wraps a longer one, and a 2-line header is what starts this.
+   **`LR` is a remedy, not a guarantee, so do not treat it as the fix and move on.** A later run
+   drew a system context in `LR` with one card in a trust-boundary cluster and the blocker fired
+   anyway: the incoming edges came from a column of five actor cards, the top card sat well ABOVE
+   the platform, and its edge therefore entered through the cluster's top edge, which is exactly
+   where a centred header lives. `LR` only helps when the sources sit at roughly the source node's
+   own row. For a ONE-NODE cluster fed by a tall column of actors, go straight to the second
+   remedy: drop the cluster, carry the boundary in the node's own `subtitle` (`"Azure Singapore
+   subscription"`) and name it in a bullet. You lose no information and the figure loses one box.
+
+17. **`build_cloud` is a five-column renderer at a 6.5in embed, and the sixth column costs you the
+   legibility floor.** The canvas width is `798 * n_columns - 30` px at `S = 3`
+   (`MARGIN*2 + n*(CELL_W + 2*COL_PAD) + (n-1)*COL_GAP`), and the on-page point size of a node
+   label is `font_pt * 1950 / width_px`, so a 24px label goes **2.84 pt at five columns (3960 px)
+   and 2.36 pt at six (4758 px)**. The 2.5 pt floor from gotcha 9 therefore falls between the two,
+   and it is not recoverable by shortening anything: it is set by the column count alone. Measured
+   on a run that authored a six-column Azure reference architecture and had to re-cut it. **Do the
+   arithmetic while authoring, not after rendering**, and when a sixth column appears, merge the two
+   tiers whose relationship the reader can infer from the boundary rather than dropping content: an
+   "Integration and worker subnet" carrying the queues, the dead letter queue, the worker and the
+   compliance component reads correctly and costs nothing, because the column boundary IS the
+   cluster. The edge you lose (queue to worker) is one an explanation bullet states better anyway.
+
 ### VERSIONED RE-RUN — reuse the CONTENT, never the RENDERER (MANDATORY)
 
 When you are regenerating a proposal that already has a previous output (a web-app
@@ -662,7 +722,7 @@ rendering, then verify after render:
 1. **Label NEVER touches its icon.** Use `node_attr["margin"] >= "0.6,0.5"`.
    In the `diagrams` package the icon is the node "shape" and the label
    sits below it; the margin pads the label inside the cell. Insufficient
-   margin = "chữ với ảnh icon dính nhau" (the user's literal complaint).
+   margin, so the label text ends up touching the icon beside it.
 2. **Label NEVER overflows the cluster frame, and NEVER orphans a "(".**
    Wrap EVERY label — node AND cluster — with the canonical helper
    `wrap_label()` from `scripts.diagrams_runtime`. Do NOT hand-insert
@@ -958,18 +1018,22 @@ include:
 
   // ---- RFP-driven optional sections (all default to null; see the block below) ----
   // Every one of these has a HARD WORD CEILING. See "OPTIONAL SECTIONS ARE SHORT".
+  // A string is PROSE; an array is a LIST. Pick per section by asking whether the content
+  // is one connected argument or a set of independent items — see "THE SHAPE FOLLOWS THE
+  // CONTENT". The shapes below are the usual answer, not a mandate: a delivery roadmap of
+  // named phases is a list, a roadmap that argues one sequencing decision is prose.
   "security_data_protection": "... | null",
   "team_structure": "... | null",
   "team_roles":     [ {"name": "Role (<count>, <seniority>, <onshore|offshore>)", "description": "one sentence of accountability"}, ... ]  | null,
   "team_engagement_model": "... | null",
-  "delivery_roadmap": "... | null",
-  "delivery_milestones": "... | null",
+  "delivery_roadmap": "... | [ "...", ... ] | null",
+  "delivery_milestones": [ "...", ... ]  | null,   // dated gates: independent items
   "delivery_governance": "... | null",
   "support_model": "... | null",
-  "service_levels": "... | null",
-  "assumptions_dependencies": "... | null",
-  "risk_register": "... | null",
-  "contractual_exceptions": "... | null",
+  "service_levels":  [ "...", ... ]  | null,       // one target per entry
+  "assumptions_dependencies": [ "...", ... ]  | null,   // a register
+  "risk_register":   [ "...", ... ]  | null,       // a register
+  "contractual_exceptions": [ "...", ... ]  | null,     // a register
 
   "summary_body": "..."
 }
@@ -986,7 +1050,17 @@ include:
 > item's advantage / role in 1-2 sentences. Aim for roughly 5-12 rows per
 > sub-section (Back-end is usually the longest). A prose string here is a
 > FORMAT DEFECT the reviewer rejects (`techstack_not_table`). Use `null`
-> only for `techstack_data` / `techstack_ai` when that tier is out of scope.
+> only for `techstack_ai` when that tier is out of scope.
+>
+> **Do NOT set `techstack_data` to `null` with this template.** `drop_section_if_empty` locates a
+> section with `find_heading_paragraph`, which returns the FIRST heading whose text CONTAINS the
+> target, case-insensitively. "Database" contains "data" and sits above the "Data" heading, so a null
+> `techstack_data` deletes the **Database** section and the table under it. Confirmed on three
+> separate runs. Every project has a real data tier to name even when it has no pipeline: the
+> evidential and reference data (the audit record, the documents as transmitted, master and reference
+> data, the operational telemetry and its retention) is genuine content, not padding, and it keeps
+> "Database" naming the engines while "Data" names the data sets. `techstack_ai` is safe to null:
+> no earlier heading contains "ai".
 >
 > **LOGO PER ROW — put a logo on EVERY row.** Each row
 > SHOULD carry `"logo": "pack/icon"`; `build_docx` embeds that PNG above the
@@ -1042,7 +1116,7 @@ upstream partner exists.
 - **Separate paragraphs inside a prose value with ONE newline, never a blank line.**
   `build_docx._expand_paragraph_with_value` does `value.split("\n")`, so a `\n\n` separator yields
   an empty middle element and therefore an **empty `Normal` paragraph** in the document, carrying
-  the full space-before and space-after. That is the visible "chỗ thì trống nhiều chỗ thì gần"
+  the full space-before and space-after. That is the visible unevenness where one gap is wide
   uneven-whitespace defect the user has flagged, and it is invisible in the JSON. One run shipped
   52 of them before anyone traced the cause. The paragraph's own space-after already supplies the
   separation, so `"para one\npara two"` is what you want. On a re-run, normalise `\n{2,}` to `\n`
@@ -1175,46 +1249,59 @@ sections at 107, 129 and 160 words, with sentences averaging 17 to 23 words, wer
 rejected as rambling. **Length was never the problem. The absence of a visual entry point
 was.** A reader skimming a bid needs somewhere for the eye to land on every section.
 
-So these sections are **ARRAYS of labelled bullets, not prose strings**:
+### THE SHAPE FOLLOWS THE CONTENT — decide it per section, never from a fixed table
 
-| Key | Bullets | Words per bullet |
-|---|---:|---:|
-| `executive_summary` | 1 lead line + 5 to 6 | 30 |
-| `security_data_protection` | 5 to 7 | 30 |
-| `team_structure` | 4 to 5 | 26 |
-| `team_engagement_model` | 3 to 4 | 26 |
-| `delivery_roadmap` | 4 to 6 | 28 |
-| `delivery_milestones` | 4 to 6 | 28 |
-| `delivery_governance` | 4 to 5 | 26 |
-| `support_model` | 4 to 6 | 28 |
-| `summary_body` | 4 to 5 | 28 |
+**This is the rule, and it was got wrong once by writing a table instead.** A previous
+version of this prompt listed nine keys and declared all of them arrays of labelled
+bullets. That turned the Executive Summary, which is one connected argument, into nine
+disconnected fragments, and it was never what the reader asked for: the instruction was to
+write TIGHTER and ON THIS PROJECT'S ACTUAL PROBLEM, and a shape change was substituted for
+the work of writing precisely. Do not restore the table.
 
-**Every bullet is `**Label**: one sentence.`** The label is 1 to 4 words naming the thing
-decided, and it carries the meaning on its own so a reader who reads only the labels still
-learns the answer. `**Residency**: enforced by subscription policy that blocks
-provisioning outside the region` works. `**Overview**: this section describes our
-approach` is padding and gets deleted.
+Ask one question of every section, about the CONTENT you are about to write:
 
-`executive_summary` is the ONE exception to bullets-only: element 1 is a single plain
-sentence stating what the client is buying, then the rest are labelled bullets.
+**Is this one argument, or a set of independent items?**
 
-**`purpose` and `mobile_app_strategy` stay prose**, at 2 to 3 sentences each. A three
-sentence section does not need bullets.
+- **One argument → PROSE.** Sentences build on each other, each one earning the next, and
+  reordering them would break the meaning. The Executive Summary is the clearest case: it
+  states what the client is buying, why this shape of solution answers their specific
+  problem, and what it costs them to say yes, and each step depends on the one before.
+  The Summary, the Purpose, the Mobile App Strategy, a team structure whose point is the
+  arithmetic behind the headcount, and a security approach that argues from one threat to
+  one control are all single arguments. Write them as short paragraphs.
+- **Independent items → a LIST.** Every entry stands alone, entries can be reordered
+  without loss, and the reader will scan for the one that concerns them. A risk register, an
+  assumptions and dependencies register, service level targets, contractual exceptions,
+  problems and solutions, and roadmap phases are genuinely enumerations. Forcing those into
+  a paragraph is the opposite failure and is just as wrong.
 
-Rejected constructions, in any of these: a sentence that only announces the section's
-topic; a bullet that continues the previous bullet's sentence; two bullets with the same
-label; a label longer than four words; a bullet with two sentences where the second only
-restates the first.
+If a section is a list, `**Label**: one sentence` is a good entry shape: the label is one
+to four words naming the thing decided and carries the meaning on its own, so a reader who
+reads only the labels still learns the answer. `**Residency**: enforced by subscription
+policy that blocks provisioning outside the region` works; `**Overview**: this section
+describes our approach` is padding and gets deleted.
 
-### THE CLOUD DECISION GOES NEAR THE TOP, AS ITS OWN BULLET
+**A wall of text is not fixed by bullets. It is fixed by having something to say.** If a
+paragraph reads as padding, the defect is that it restates the requirement, announces the
+section's topic, or describes an approach in the abstract instead of naming what was
+decided for THIS client. Cut those sentences and the paragraph reads well without changing
+shape. The reference deliveries confirm it: their Executive Summary is roughly five short
+paragraphs and their Summary about six, both prose, both specific.
 
-"Why this platform" must be a **labelled bullet inside `executive_summary`**, in the first
-three bullets, not a sentence buried in a paragraph. It was buried once: the rationale was
-present in paragraph three of five and a reader reported it missing, which for a bid means
-it WAS missing. One bullet, the requirement first and the platform second:
+Rejected in any shape: a sentence that only announces the section's topic; an entry that
+continues the previous entry's sentence; two entries with the same label; a label longer
+than four words; a second sentence that only restates the first.
 
-`**Cloud**: residency is mandatory and only this platform has two regions in country, so
-recovery and model inference never leave it`
+### THE CLOUD DECISION GOES NEAR THE TOP
+
+"Why this platform" belongs in the **opening of `executive_summary`**, in its first or
+second paragraph, never further down. It was buried once: the rationale sat in paragraph
+three of five and a reader reported it missing, which for a bid means it WAS missing. State
+the requirement first and the platform second, in one sentence, and do not change the
+section's shape to carry it:
+
+`Residency is mandatory and only this platform has two regions in country, so recovery and
+model inference never leave it.`
 
 The fuller argument still belongs in the hosting row of the technology stack and in the
 assumptions register, as set out above. This bullet exists so nobody has to find it.
@@ -1232,7 +1319,7 @@ technical substance to hit a word count is the failure this rule exists to preve
 |---|---:|---|
 | `problems_and_solutions` | **55 words per pair** | The prompt already said "two sentences" per bullet. Measured, the last run averaged 143 words, so the rule existed and was ignored. 55 words is two real sentences |
 | `executive_summary` | 260 | An evaluator reads this and decides whether to keep reading |
-| `summary_body` | 200 | It restates; it does not re-argue |
+| `summary_body` | 400 | It restates; it does not re-argue. 400, not 200: the house Summary in the reference deliveries is about six paragraphs and 350 words, and a 200-word ceiling could not hold that shape, so the ceiling was wrong rather than the pattern. `format_reviewer._NARRATIVE_CEILINGS` already reads 400; this line had drifted behind it |
 | `purpose` | 150 | Why this engagement exists, not what is in it |
 | `mobile_app_strategy` | 160 | The decision and its consequence, nothing else |
 | `system_overview_intro` | 300 | Technical, so generous, but still bounded |

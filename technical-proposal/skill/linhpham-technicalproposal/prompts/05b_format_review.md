@@ -45,6 +45,9 @@ manual-only issues.
 | `image_spacing_ok`, `caption_gap_ok` | text crushed against a figure or its caption |
 | `body_justified`, `justify_whitespace_neutralised` | rivers of white space down a justified column |
 | `em_dash_prose_ok`, `latin_abbreviation_ok` | the two constructions that read as machine-written |
+| `bullets_are_real_lists` | a bullet that is a `●` typed into an ordinary paragraph. The template defines no bullet list, so every bullet was faked until `build_docx.ensure_bullet_numbering` wrote one. Word on a desktop hides it; SharePoint does not, and the reader ends up removing and re-applying every list by hand |
+| `bullet_spacing_uniform` | the gap between bullets changing down the page. One delivery carried six different space-before/after pairs because each pass stamped its own and none ran last |
+| `heading_number_not_duplicated` | `3.5.1. 4.5.1 Testing Workflow`. A heading that Word numbers must not also carry a typed number; the duplicate stays invisible while the two agree and appears the moment a section is dropped |
 | `optional_section_length`, `narrative_length` | a section past its word ceiling |
 
 **Two things the reviewer cannot see, so check them by hand:**
@@ -149,6 +152,71 @@ Run order matters and is not idempotent: `build_docx.py`, then any post-assembly
 > list it in the Phase 6 report. Record the underlying one-line script fix as
 > `⚠ NEEDS CODE PROMOTION` rather than editing the script in an unattended run.
 
+> **The third standing repair: a generated table row breaks across a page, and the cell text is
+> perfectly correct.** `python-docx` writes no row properties, so Word's default lets a row split at a
+> page boundary. On a technology table whose first column carries a logo above a bold name, that reads
+> as a defect: one run shipped "Vitest with React" at the foot of a page and **"Testing Library" alone
+> at the top of the next**, plus a second split on an App Service row. Nothing catches it, because
+> `format_reviewer` reads the cell TEXT (complete) and the table structure (well formed) and never
+> the page. Repair the delivered file, in the run's own `specs/`, over every table whose header row is
+> `Technology | Advantages` or `Role | Accountability` and never over the template's own tables:
+> `w:cantSplit` on every row, `w:tblHeader` on the header so a continuation is labelled,
+> `keep_with_next` on the header row's cell paragraphs so the header cannot sit alone at the foot of a
+> page, and a row height stamped as **`atLeast`** (never `exact`). That last one also closes the
+> hand-check item above: Word Online and SharePoint do not auto-fit, so an unstamped row can render
+> clipped there while it looks right locally, and `atLeast` fixes it without ever truncating.
+> Same ordering as the other two repairs: after `build_docx.py`, before `auto_fix.py`, listed in the
+> Phase 6 report. Expect the page count to rise by one or two: a row that would have split now moves
+> whole. **⚠ NEEDS CODE PROMOTION: `scripts/build_docx.py::_build_techstack_table` — set `cantSplit`,
+> `tblHeader`, header keep-with-next and an `atLeast` height on the rows it builds.**
+>
+> **Look at every figure against the FOOTER, because no check does.** `diagram_check` caps a figure at
+> 9.0in and `04_generate.md` said 8.5in, but this template starts the body at 2.12in and puts the
+> footer's first line at 10.20in, so the real budget is 7.98in and about 7.6in with the caption. An
+> 8.36in flowchart passed the diagram check, passed this review with 0 blockers, and printed over
+> "Saigon Technology". Convert the assembled file to PDF and compare every image bbox bottom against
+> 10.20in (the probe is in `04_generate.md` gotcha 15); the fix is a smaller `width_inches` on that
+> one figure in `diagrams.json`, which is a content change, so it is one of the few cases where
+> re-running Phase 5a is correct.
+>
+> **The fourth standing repair: a PROSE section can ship with no paragraph spacing at all, and no
+> check measures it.** `build_docx._expand_paragraph_with_value` expands a multi-paragraph value by
+> CLONING the template paragraph that held the placeholder, so the section inherits whatever spacing
+> that particular slot happens to carry. The SUMMARY slot carries none. On one run the Summary's six
+> paragraphs rendered with **zero** gap between them while the other 189 body paragraphs in the same
+> document carried 6pt, which is the uneven-whitespace defect the user has flagged, arriving from a
+> direction nobody was watching. It only became visible because THE SHAPE FOLLOWS THE CONTENT turned
+> that section from bullets into prose, so expect it on any section that changes shape between
+> versions. `format_reviewer.py` measures heading spacing, image spacing and caption gaps, never body
+> paragraph spacing, so it passed with 0 blockers. Find it by counting:
+> ```
+> python -c "from docx import Document; from collections import Counter; d=Document(DOCX); \
+> print(Counter(p.paragraph_format.space_after for p in d.paragraphs if p.style.name=='Normal'))"
+> ```
+> One dominant value plus a handful of `None` is the defect, and the `None` group names the section.
+> Repair in the delivered file, in the run's own `specs/`: walk from the heading to the next heading
+> and set `space_after` to the document's own dominant value on any body paragraph carrying `None`.
+> Same ordering as the other three repairs, and list it in the Phase 6 report.
+> **⚠ NEEDS CODE PROMOTION: `scripts/build_docx.py::_expand_paragraph_with_value` — when the cloned
+> source paragraph carries no explicit `space_after`, stamp the document's body value rather than
+> inheriting nothing.**
+>
+> **`bullet_hanging_indent` can no longer appear in `checks_passed`, and its absence is now the
+> PASS.** The gate table above lists it as a check that must be present, and that is no longer
+> satisfiable on a normal build: `build_docx.py` gained `convert_glyph_bullets_to_real_lists`, which
+> turns every `●` paragraph into a real Word list item, while `check_bullet_hanging_indent` skips any
+> paragraph carrying `w:numPr` and only calls `report.pass_` when it measured at least one glyph
+> bullet. So a clean build measures zero and reports nothing. Confirm it the right way rather than
+> hunting for a check that cannot fire: `build_docx.py` prints `Glyph bullets converted to Word list
+> items: N (numId=M)`, and the visual pass shows the hanging indent on a wrapped bullet. Treat the
+> check as satisfied when that conversion count is non-zero AND `no_bullet_number_duplicates` passed;
+> treat it as a real gap only if glyph bullets survived into the delivered file.
+>
+> **A footer probe over image bboxes needs one exclusion.** The template's own cover and back-page
+> artwork is full-bleed: it starts at the paper edge and is 11.69in tall, so it trips any naive
+> "bottom below 10.20in" test and buries the real figures in false positives. Skip an image whose top
+> is above about 0.2in AND whose height is over 10in; everything else is a figure this run produced.
+>
 > **`narrative_length_not_measured` is a signal, not noise.** `check_narrative_length` matches a
 > section by its heading text, lowercased, against `_NARRATIVE_CEILINGS` and `_PER_BULLET_CEILINGS`.
 > When it can match nothing it emits this minor deliberately, because silence would be
@@ -225,7 +293,7 @@ report — auto-fix them first, then re-verify visually.
       bullet list is a presentation defect.
 - [ ] **No heading is left-indented deeper than the body text it introduces**
       (`heading_deeper_than_body`). Heading 5 at L=36pt over body at L=0pt
-      reads as "title thụt vô sâu hơn text" — wrong visual hierarchy.
+      makes the heading look indented deeper than its own body: wrong visual hierarchy.
 - [ ] **Heading space-before respects the floors**: H1-H3 ≥ 24pt, H4-H5 ≥ 18pt,
       H6 ≥ 12pt (`heading_section_spacing_tight`). Cramped section transitions
       make the doc feel like a wall of text.
@@ -233,7 +301,7 @@ report — auto-fix them first, then re-verify visually.
       `hyphenationZone`, `doNotExpandShiftReturn`, `characterSpacingControl`,
       `updateFields` (`settings_flags_missing`). Missing `doNotExpandShiftReturn`
       is the leading cause of visible whitespace channels in justified
-      paragraphs ("chữ chứa khoảng trắng khi canh đều").
+      paragraphs, where justification opens visible channels of white space.
 - [ ] **No "● Step N —"** even after auto-fix, since the Phase-4 content-writer
       should now follow the updated rule in `04_generate.md` not to manually
       number bullet items. If this regression survives the auto-fix loop,
