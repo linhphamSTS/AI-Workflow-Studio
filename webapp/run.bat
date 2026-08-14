@@ -9,7 +9,7 @@ if not defined PYEXE ( where python >nul 2>&1 && set "PYEXE=python" )
 if not defined PYEXE (
   echo.
   echo [!] Python 3.10+ was not found.
-  echo     Install it from https://www.python.org/downloads/ (tick "Add python.exe to PATH"),
+  echo     Install it from https://www.python.org/downloads/ ^(tick "Add python.exe to PATH"^),
   echo     then double-click this file again.
   echo.
   pause
