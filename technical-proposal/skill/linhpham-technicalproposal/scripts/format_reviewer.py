@@ -653,6 +653,7 @@ _PER_BULLET_CEILINGS = {
     "assumptions & dependencies": 50,
     "service level targets": 50,
     "contractual exceptions": 50,
+    "phase 2 scope & triggers": 50,
 }
 
 
@@ -759,6 +760,59 @@ def check_optional_section_length(docx_path: Path, report: Report) -> None:
         ))
     else:
         report.pass_("optional_section_length")
+
+
+#: Header fill written by ``build_docx._build_techstack_table``. Every table this skill
+#: GENERATES carries it; the template's own tables use other fills. Scoping the row checks by
+#: this marker keeps the gate on content a run can actually change, which is the difference
+#: between a useful check and one that flags the template on every project until it is ignored.
+_GENERATED_TABLE_HEADER_FILL = "595959"
+
+
+def check_generated_table_rows(docx_path: Path, report: Report) -> None:
+    """Generated tables must not break badly across a page.
+
+    python-docx writes no row properties at all, so without an explicit pass a generated table
+    can split a row down the middle (half a sentence stranded under a logo cell at the top of
+    the next page), can continue onto a second page with no header row to say what the columns
+    are, and carries no stamped row height, which is what makes wrapped cells clip in Word
+    Online and SharePoint. Cell text and table structure both read perfectly while all three
+    are happening, so no other check sees it and only a render does.
+
+    ``build_docx._harden_table_rows`` now sets these at source, so a fresh build passes. The
+    check exists because this repair was hand-applied per project three times before that, and
+    a fix with no check behind it comes undone.
+    """
+    doc = Document(str(docx_path))
+    bad = []
+    for tbl in doc.tables:
+        if not tbl.rows:
+            continue
+        fills = re.findall(r'w:fill="([0-9A-Fa-f]{6})"', tbl.rows[0].cells[0]._tc.xml)
+        if not fills or fills[0].upper() != _GENERATED_TABLE_HEADER_FILL:
+            continue                      # a template table: not this run's to change
+        head = " | ".join((c.text or "").strip()[:20] for c in tbl.rows[0].cells)
+        missing = []
+        if any("<w:cantSplit" not in r._tr.xml for r in tbl.rows):
+            missing.append("cantSplit")
+        if any("<w:trHeight" not in r._tr.xml for r in tbl.rows):
+            missing.append("trHeight")
+        header_xml = tbl.rows[0]._tr.xml
+        if "<w:tblHeader" not in header_xml:
+            missing.append("tblHeader")
+        if "<w:keepNext" not in header_xml:
+            missing.append("header keepNext")
+        if missing:
+            bad.append((head, ", ".join(missing)))
+    if bad:
+        report.add(Issue(
+            "generated_table_rows_unhardened", "layout", "major", True,
+            f"{len(bad)} generated table(s) can split or orphan across a page",
+            detail="; ".join(f"'{h}' missing {m}" for h, m in bad)
+                   + " — auto_fix.py --issue generated_table_rows_unhardened",
+        ))
+    else:
+        report.pass_("generated_table_rows")
 
 
 def check_team_roles_is_table(docx_path: Path, report: Report) -> None:
@@ -1112,6 +1166,10 @@ CHECKS = [
     ("optional_section_length",        check_optional_section_length),
     ("narrative_length",               check_narrative_length),
     ("team_roles_is_table",            check_team_roles_is_table),
+    # Added 2026-08-27: python-docx writes no row properties, so a generated table could split
+    # a row across a page, continue with no header, and carry no stamped height. Repaired by
+    # hand on three separate projects before build_docx started setting them at source.
+    ("generated_table_rows",           check_generated_table_rows),
     ("em_dash_in_prose",               check_em_dash_in_prose),
     ("latin_abbreviation_in_content",  check_latin_abbreviation_in_content),
     # Added 2026-07-29: the UAT terms are contractual and live verbatim in the template

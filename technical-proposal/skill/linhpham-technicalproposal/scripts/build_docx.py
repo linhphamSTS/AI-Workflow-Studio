@@ -626,6 +626,7 @@ OPTIONAL_SECTION_GROUPS = [
     ]),
     ("DELIVERY PLAN & GOVERNANCE", [
         ("Delivery Roadmap", "delivery_roadmap"),
+        ("Phase 2 Scope & Triggers", "phase_two_scope"),
         ("Milestones & Acceptance", "delivery_milestones"),
         ("Governance & Reporting", "delivery_governance"),
     ]),
@@ -1197,6 +1198,46 @@ def _set_table_borders(table, color: str = "B7B7B7", size: int = 8) -> None:
     tblPr.append(borders)
 
 
+def _harden_table_rows(tbl, min_height_twips: int = 340) -> None:
+    """Stop a generated table from breaking badly across a page.
+
+    python-docx writes no row properties at all, so by default a Word table can split a row
+    down the middle (leaving half a sentence stranded under a logo cell at the top of the next
+    page), can continue onto a second page with no header to say what the columns are, and
+    carries no stamped row height, which is what makes wrapped cells clip in Word Online and
+    SharePoint. None of that is visible to a check that reads cell text or table structure;
+    it only shows up in a render, which is why this was hand-repaired per project three times
+    before being fixed here.
+
+    Four properties, and the first two are NOT interchangeable:
+      * ``cantSplit``  on every row  — a row stays whole.
+      * ``tblHeader``  on row 0      — the header repeats on each continuation page.
+      * ``keepNext``   on the header's paragraphs — the header cannot land alone at the foot
+        of a page with its first data row overleaf. ``tblHeader`` does not do this.
+      * ``trHeight`` ``atLeast``     — a stamped minimum so hosts that never auto-fit still
+        give the row room.
+    """
+    from docx.oxml import OxmlElement
+
+    for idx, row in enumerate(tbl.rows):
+        trPr = row._tr.get_or_add_trPr()
+        if trPr.find(qn("w:cantSplit")) is None:
+            trPr.append(OxmlElement("w:cantSplit"))
+        if trPr.find(qn("w:trHeight")) is None:
+            height = OxmlElement("w:trHeight")
+            height.set(qn("w:val"), str(min_height_twips))
+            height.set(qn("w:hRule"), "atLeast")
+            trPr.append(height)
+        if idx == 0:
+            if trPr.find(qn("w:tblHeader")) is None:
+                trPr.append(OxmlElement("w:tblHeader"))
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    pPr = para._p.get_or_add_pPr()
+                    if pPr.find(qn("w:keepNext")) is None:
+                        pPr.append(OxmlElement("w:keepNext"))
+
+
 def _build_techstack_table(doc, items: list[dict], header_fill: str = "595959",
                            headers: tuple = ("Technology", "Advantages"),
                            col0_inches: float = 1.75):
@@ -1316,6 +1357,7 @@ def _build_techstack_table(doc, items: list[dict], header_fill: str = "595959",
         desc_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
     _set_table_borders(tbl, color="B7B7B7", size=8)
+    _harden_table_rows(tbl)
     return tbl
 
 

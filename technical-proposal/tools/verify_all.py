@@ -112,13 +112,16 @@ def smoke_test() -> bool:
         "client_contact_email": "cto@acme.example",
         "vendor_partner_name": "the upstream provider",
         "executive_summary": "Headline executive summary text.",
-        "problems_and_solutions": "● **Problem** — solution.",
+        # The fixture has to satisfy the CURRENT schema or this suite reports failures that
+        # say nothing about the code under test: techstack keys are ARRAYS of rows, and the
+        # em-dash is a blocker in body prose, so the sample sentence may not contain one.
+        "problems_and_solutions": "● **Problem**: the stated solution.",
         "purpose": "Purpose paragraph for the bid.",
         "system_overview_intro": "High-level system overview intro.",
-        "techstack_backend": ".NET 10",
-        "techstack_frontend": "React 18 + Vite",
-        "techstack_database": "Aurora PostgreSQL 16",
-        "techstack_server_hosting": "EKS multi-AZ",
+        "techstack_backend": [{"name": ".NET 10", "description": "Long-term-support runtime for the transactional core."}],
+        "techstack_frontend": [{"name": "React 18", "description": "Component model the admin portal is built on."}],
+        "techstack_database": [{"name": "PostgreSQL 16", "description": "Relational store for the loyalty ledger."}],
+        "techstack_server_hosting": [{"name": "Managed Kubernetes", "description": "Multi-zone hosting for the service tier."}],
         "techstack_data": None,
         "techstack_ai": None,
         "mobile_app_strategy": None,

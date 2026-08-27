@@ -325,7 +325,55 @@ def fix_caption_text_crush(docx_path: Path) -> int:
     return count
 
 
+def fix_generated_table_rows(docx_path: Path) -> int:
+    """Set cantSplit / trHeight on every row of a generated table, plus tblHeader and
+    keep-with-next on its header row. Same repair build_docx._harden_table_rows performs at
+    build time, applied to a document that was assembled before that existed.
+
+    Scoped by the generated tables' header fill so the template's own tables are left alone.
+    """
+    from docx.oxml import OxmlElement
+    import re as _re
+
+    header_fill = "595959"
+    doc = Document(str(docx_path))
+    count = 0
+    for tbl in doc.tables:
+        if not tbl.rows:
+            continue
+        fills = _re.findall(r'w:fill="([0-9A-Fa-f]{6})"', tbl.rows[0].cells[0]._tc.xml)
+        if not fills or fills[0].upper() != header_fill:
+            continue
+        for idx, row in enumerate(tbl.rows):
+            touched = False
+            trPr = row._tr.get_or_add_trPr()
+            if trPr.find(qn("w:cantSplit")) is None:
+                trPr.append(OxmlElement("w:cantSplit"))
+                touched = True
+            if trPr.find(qn("w:trHeight")) is None:
+                height = OxmlElement("w:trHeight")
+                height.set(qn("w:val"), "340")
+                height.set(qn("w:hRule"), "atLeast")
+                trPr.append(height)
+                touched = True
+            if idx == 0:
+                if trPr.find(qn("w:tblHeader")) is None:
+                    trPr.append(OxmlElement("w:tblHeader"))
+                    touched = True
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        pPr = para._p.get_or_add_pPr()
+                        if pPr.find(qn("w:keepNext")) is None:
+                            pPr.append(OxmlElement("w:keepNext"))
+                            touched = True
+            if touched:
+                count += 1
+    doc.save(str(docx_path))
+    return count
+
+
 FIXERS = {
+    "generated_table_rows_unhardened": fix_generated_table_rows,
     "track_changes_present":          fix_track_changes,
     "comments_present":               fix_comments,
     "body_not_justified":             fix_justify,

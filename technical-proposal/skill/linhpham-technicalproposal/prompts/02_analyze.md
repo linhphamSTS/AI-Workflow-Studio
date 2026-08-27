@@ -108,6 +108,16 @@ scratch.
    - **Constraints** — anything the bidder is not free to change
      (existing cloud account, existing language, existing partner,
      budget envelope, go-live date).
+   - **Deferred scope** — every capability the client themselves put
+     outside the first release. The words to underline are "optional",
+     "price separately", "later phase", "after the pilot", "nice to
+     have", "future", "when we need it", and any scope table with a
+     priority column. **Record who deferred it and why in their words**,
+     not just that it is out. This register becomes `phase_two_scope` in
+     Phase 4, and without it the deferred half of the bid dissolves into
+     scattered asides. Note separately anything the client asked to be
+     quoted as its own line, because a separately-quoted item is a
+     commercial decision they intend to make, not a capability gap.
    - **Implicit problems** — what the RFP is silent on but a senior
      reviewer would flag (e.g. RFP gives a peak RPS but no soak duration;
      RFP says "secure" but doesn't quantify; RFP mentions a vendor but

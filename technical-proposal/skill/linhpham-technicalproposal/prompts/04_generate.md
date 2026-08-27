@@ -1027,6 +1027,7 @@ include:
   "team_roles":     [ {"name": "Role (<count>, <seniority>, <onshore|offshore>)", "description": "one sentence of accountability"}, ... ]  | null,
   "team_engagement_model": "... | null",
   "delivery_roadmap": "... | [ "...", ... ] | null",
+  "phase_two_scope": [ "...", ... ]  | null,       // a register; see PHASE 2 NEEDS A SHAPE
   "delivery_milestones": [ "...", ... ]  | null,   // dated gates: independent items
   "delivery_governance": "... | null",
   "support_model": "... | null",
@@ -1164,6 +1165,7 @@ the ones it asks for. Filling a section the client never requested is padding.
 | `team_roles` | › Roles & Responsibilities | the positions, **how many people in each**, seniority and location. An ARRAY rendered as a `Role \| Accountability` table |
 | `team_engagement_model` | › Engagement Model | onshore/offshore split, working hours overlap, how the client interacts with the team |
 | `delivery_roadmap` | DELIVERY PLAN & GOVERNANCE › Delivery Roadmap | a phased roadmap or a sequencing proposal |
+| `phase_two_scope` | › Phase 2 Scope & Triggers | the client deferred part of the scope, or budgets more than one year at a time. An ARRAY, one entry per deferred item. See PHASE 2 NEEDS A SHAPE |
 | `delivery_milestones` | › Milestones & Acceptance | milestones and what acceptance means at each |
 | `delivery_governance` | › Governance & Reporting | steering, escalation, change control, reporting cadence |
 | `support_model` | SUPPORT & SERVICE LEVELS › Support Model | a run / managed-service phase: coverage, tiers, tooling |
@@ -1172,6 +1174,51 @@ the ones it asks for. Filling a section the client never requested is padding.
 | `risk_register` | › Key Risks & Mitigations | a risk view; each entry states the risk, its impact and the mitigation already built into the approach |
 | `references` | CASE STUDY › References | client references |
 | `contractual_exceptions` | CONTRACTUAL EXCEPTIONS | exceptions to the client's contract terms |
+
+### PHASE 2 NEEDS A SHAPE, OR THE BUDGET ONLY COVERS PHASE 1
+
+Most bids defer part of the scope, and the deferred half then leaks into the document as
+five different phrases in four different sections: "priced separately", "designed for but
+not enabled", "later", "in future", "when needed". Measured on one delivered bid, the words
+"Phase 2" appeared in **zero** of its six artefacts while eleven distinct items sat deferred
+across the technology stack, a figure's bullets, the security section and the risk register.
+A reader could not assemble Phase 2 at all.
+
+That is a commercial defect, not a tidiness one. When a client budgets several years in a
+single submission, an unshaped Phase 2 means the approval covers Phase 1 only and every later
+item becomes a fresh procurement round, which is exactly the round a competitor can enter.
+
+**Fill `phase_two_scope` whenever the analysis found deferred scope.** One entry per item:
+
+```
+"**<the item>**: waits because <reason in the client's own terms>; opens when <condition>."
+```
+
+Three rules for those entries, and the third is the one that gets skipped:
+
+1. **Every item must be one the CLIENT deferred**, not one you decided to hold back. Cite
+   their own classification where they gave one. An item you invented reads as an upsell.
+2. **State why it waits in their terms.** "The client's stated priority order is to reuse the
+   existing gateway before adding operating cost" persuades; "not required yet" does not.
+3. **The trigger is a MEASURABLE CONDITION, never a date.** "When source systems exceed what
+   a config file can govern", "when the share of business-data errors in the dead-letter queue
+   has been measured", "when an audit requirement exceeds the operational replay window". A
+   date is a promise nobody authorised, and it goes stale the moment the plan moves.
+
+**Group the entries by why they wait**, because that decides who decides: budget or policy ·
+business readiness · growth · risk contingency. Four items under one "optional" heading tells
+the reader nothing about which of them needs a decision this month.
+
+**Also state, inside `delivery_roadmap`, the decisions that must be taken in Phase 1 even
+though the work sits in Phase 2** — the ones where deciding late costs far more than deciding
+now. They are usually cheap and structural: a stable hostname so a later gateway swap does not
+force every integrating partner to change their endpoint a second time; an envelope that
+already carries a version field and a business timestamp; an abstraction that lets a transport
+be added without touching business code. Naming these is the cheapest technical credibility in
+the document, because it shows Phase 2 was considered while Phase 1 was designed.
+
+**Do not put a price, a rate or an effort figure on any Phase 2 item.** Those belong in the
+commercial schedule, and several of these items are explicitly the client's to procure.
 
 ### THE CLOUD CHOICE MUST BE JUSTIFIED IN THE DOCUMENT, IN THREE PLACES
 
@@ -1400,8 +1447,8 @@ preference. Answer the question, state the commitment, stop.
 | `support_model` | 160 | coverage, tiers, tooling, reporting |
 
 List-valued sections (`service_levels`, `assumptions_dependencies`, `risk_register`,
-`contractual_exceptions`, `references`) are capped per ENTRY at **50 words**, not in
-total, so the list can be as long as the RFP requires while each line stays scannable.
+`contractual_exceptions`, `phase_two_scope`, `references`) are capped per ENTRY at
+**50 words**, not in total, so the list can be as long as the RFP requires while each line stays scannable.
 (Fifty, not forty-five: at forty-five the gate fired on entries one word over, and a
 check that cries wolf gets ignored, which is worse than not having it.)
 

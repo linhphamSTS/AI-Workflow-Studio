@@ -152,23 +152,27 @@ Run order matters and is not idempotent: `build_docx.py`, then any post-assembly
 > list it in the Phase 6 report. Record the underlying one-line script fix as
 > `⚠ NEEDS CODE PROMOTION` rather than editing the script in an unattended run.
 
-> **The third standing repair: a generated table row breaks across a page, and the cell text is
-> perfectly correct.** `python-docx` writes no row properties, so Word's default lets a row split at a
-> page boundary. On a technology table whose first column carries a logo above a bold name, that reads
-> as a defect: one run shipped "Vitest with React" at the foot of a page and **"Testing Library" alone
-> at the top of the next**, plus a second split on an App Service row. Nothing catches it, because
-> `format_reviewer` reads the cell TEXT (complete) and the table structure (well formed) and never
-> the page. Repair the delivered file, in the run's own `specs/`, over every table whose header row is
-> `Technology | Advantages` or `Role | Accountability` and never over the template's own tables:
-> `w:cantSplit` on every row, `w:tblHeader` on the header so a continuation is labelled,
-> `keep_with_next` on the header row's cell paragraphs so the header cannot sit alone at the foot of a
-> page, and a row height stamped as **`atLeast`** (never `exact`). That last one also closes the
-> hand-check item above: Word Online and SharePoint do not auto-fit, so an unstamped row can render
-> clipped there while it looks right locally, and `atLeast` fixes it without ever truncating.
-> Same ordering as the other two repairs: after `build_docx.py`, before `auto_fix.py`, listed in the
-> Phase 6 report. Expect the page count to rise by one or two: a row that would have split now moves
-> whole. **⚠ NEEDS CODE PROMOTION: `scripts/build_docx.py::_build_techstack_table` — set `cantSplit`,
-> `tblHeader`, header keep-with-next and an `atLeast` height on the rows it builds.**
+> **~~The third standing repair~~ — PROMOTED TO CODE 2026-08-27, no longer a hand repair.**
+> A generated table row could break across a page while its cell text stayed perfectly correct.
+> `python-docx` writes no row properties, so Word's default let a row split at a page boundary: one
+> run shipped "Vitest with React" at the foot of a page and **"Testing Library" alone at the top of
+> the next**. Nothing caught it, because `format_reviewer` read the cell TEXT (complete) and the table
+> structure (well formed) and never the page. It was hand-repaired in three separate projects' `specs/`
+> folders before being fixed at source.
+>
+> Now `build_docx._harden_table_rows` sets all four properties on every table it generates, so a fresh
+> build passes with nothing to do: `w:cantSplit` on every row, `w:tblHeader` on the header so a
+> continuation is labelled, `keepNext` on the header row's cell paragraphs so the header cannot sit
+> alone at the foot of a page (`tblHeader` alone does NOT prevent that), and a row height stamped as
+> **`atLeast`** (never `exact`). The height also closes the SharePoint hand-check above: Word Online
+> and SharePoint do not auto-fit, so an unstamped row can render clipped there while it looks right
+> locally.
+>
+> The reviewer check `generated_table_rows` now enforces it, scoped by the generated tables' header
+> fill so the template's own tables are never flagged. For a document assembled BEFORE this fix, the
+> repair is one command and no longer a bespoke script:
+> `python scripts/auto_fix.py --docx <file> --issue generated_table_rows_unhardened`.
+> Expect the page count to rise by one or two: a row that would have split now moves whole.
 >
 > **Look at every figure against the FOOTER, because no check does.** `diagram_check` caps a figure at
 > 9.0in and `04_generate.md` said 8.5in, but this template starts the body at 2.12in and puts the
