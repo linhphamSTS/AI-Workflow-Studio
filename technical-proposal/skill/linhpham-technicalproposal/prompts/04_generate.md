@@ -1175,6 +1175,32 @@ the ones it asks for. Filling a section the client never requested is padding.
 | `references` | CASE STUDY › References | client references |
 | `contractual_exceptions` | CONTRACTUAL EXCEPTIONS | exceptions to the client's contract terms |
 
+### EVERY COMMITMENT MUST NAME ITS SCOPE
+
+An availability, latency or durability number without a scope is a promise over whatever the
+reader decides it covers, and the reader decides generously. Three rules, each from a defect
+found in a delivered bid:
+
+1. **Availability is multiplicative across a serial chain, so say which chain.** Five tiers at
+   99.9% and 99.95% land near **99.64%, about 155 minutes a month**, not 99.9%. A bid that
+   states 99.9% "for the whole flow" has committed to something the arithmetic already refuses.
+   State the figure **for the platform the bidder operates**, and name the end-to-end figure as
+   a separate agreement once the target system has been measured.
+2. **Never commit end-to-end over a system the CLIENT operates.** If the flow terminates in the
+   client's ERP, their database or a partner's endpoint, the bid cannot carry its availability.
+   Say so plainly and split the responsibility; clients respect the line and it is the one that
+   survives contract review.
+3. **A durability claim must name the failure it survives.** "RPO 0" backed by zone-redundant
+   storage is RPO 0 for the loss of a ZONE, not of a region. Write which one, and if regional
+   recovery is out of scope, carry it as a Phase 2 item rather than leaving it unsaid: silence
+   here reads as a commitment.
+
+**And when the client asks for limits, publish them with the arithmetic.** A requirement asking
+for the ceilings on record size, throughput and processing time is not answered by a sentence
+about a platform's message-size cap. Show the division: "20,000 records in 15 minutes is 22.2
+per second, which needs about six concurrent sessions at 250 ms per call". A reader can check
+that, and checking it is what makes the rest of the document credible.
+
 ### PHASE 2 NEEDS A SHAPE, OR THE BUDGET ONLY COVERS PHASE 1
 
 Most bids defer part of the scope, and the deferred half then leaks into the document as

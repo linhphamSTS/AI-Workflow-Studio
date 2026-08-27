@@ -815,6 +815,49 @@ def check_generated_table_rows(docx_path: Path, report: Report) -> None:
         report.pass_("generated_table_rows")
 
 
+#: Phrases that attach a commitment to the WHOLE chain. Availability multiplies across a serial
+#: chain, and the chain usually ends inside a system the client operates, so a percentage tied to
+#: one of these is a promise the arithmetic already refuses. Bilingual because the skill delivers
+#: in more than one language.
+_WHOLE_CHAIN = r"toàn luồng|toàn hệ thống|toàn chuỗi|end[ -]to[ -]end|whole flow|entire flow"
+_AVAILABILITY = r"\b9\d[.,]\d{1,2}\s*%"
+
+
+def check_commitment_scope(docx_path: Path, report: Report) -> None:
+    """An availability figure must not be attached to an unqualified whole-chain scope.
+
+    Five tiers at 99.9 and 99.95 per cent multiply out to about 99.64 per cent, roughly 155
+    minutes a month, so "99.9% end to end" is refused by arithmetic before anyone argues about
+    it. Worse, the chain normally terminates in the client's own ERP or database, which the bid
+    cannot carry. One delivered proposal committed exactly this while the bid team's internal
+    brief said in as many words not to; no structural check could see it, because both sentences
+    were well formed and in the right section.
+
+    Scope the figure to the platform the bidder operates and name the end-to-end number as a
+    separate agreement after measurement.
+    """
+    doc = Document(str(docx_path))
+    texts = [" ".join((p.text or "").split()) for p in doc.paragraphs]
+    for tbl in doc.tables:
+        for row in tbl.rows:
+            for cell in row.cells:
+                texts.append(" ".join((cell.text or "").split()))
+    bad = [t for t in texts
+           if re.search(_AVAILABILITY, t) and re.search(_WHOLE_CHAIN, t, re.I)]
+    if bad:
+        report.add(Issue(
+            "availability_scope_unqualified", "polish", "major", False,
+            f"{len(bad)} availability commitment(s) claim the whole chain rather than the "
+            f"platform the bid operates",
+            detail="; ".join(t[:160] for t in bad)
+                   + " -- availability multiplies across a serial chain and the chain usually "
+                     "ends in a client-operated system; scope the figure to the platform and "
+                     "agree the end-to-end number after measurement",
+        ))
+    else:
+        report.pass_("commitment_scope")
+
+
 def check_team_roles_is_table(docx_path: Path, report: Report) -> None:
     """Roles & Responsibilities must render as a 'Role | Accountability' table.
 
@@ -1170,6 +1213,9 @@ CHECKS = [
     # a row across a page, continue with no header, and carry no stamped height. Repaired by
     # hand on three separate projects before build_docx started setting them at source.
     ("generated_table_rows",           check_generated_table_rows),
+    # Added 2026-08-27: a delivered bid committed 99,9% across a chain ending in the client's
+    # own ERP, which serial-availability arithmetic refuses before anyone argues about it.
+    ("commitment_scope",               check_commitment_scope),
     ("em_dash_in_prose",               check_em_dash_in_prose),
     ("latin_abbreviation_in_content",  check_latin_abbreviation_in_content),
     # Added 2026-07-29: the UAT terms are contractual and live verbatim in the template
