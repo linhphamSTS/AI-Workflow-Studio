@@ -45,8 +45,10 @@ so the shape matters:
     {"id": "1", "title": "...", "purpose": "...", "leaf_estimate": 12,
      "notes": "why this module exists as its own line"}
   ],
-  "columns": ["UI/UX", "BE", "FE", "Mobile", "AI", "DevOps"],
-  "columns_reason": "<why these, and why any are deliberately zero>",
+  "language": "en" | "vi",
+  "language_reason": "<what decided it: the client's documents, the client>",
+  "columns": ["UI/UX Design", "Devops", "Back-end Development", "Front-end Development", "Mobile", "AI"],
+  "columns_reason": "<the house set is fixed; say which stay at zero and why>",
   "factors": [
     {"name": "AI-assisted development", "value": "x0.8 per task type",
      "direction": "down", "reason": "...", "applies_to": "..."},
@@ -86,6 +88,13 @@ so the shape matters:
 - **Both directions of the factor stack.** Downward factors are easy to remember and upward
   ones get forgotten: an integration buffer, no public sandbox, legacy protocols, a row that
   bundles N integrations, genuinely unclear requirements. List each with what it applies to.
+- **House format (`04_estimate.md`, Module order and Sheet format).** In AUTHOR mode the
+  columns are always the six above in that order; module 1 is Infrastructure, then the shared
+  back-end/platform, then one module per app, and the LAST module is Non-Functional
+  Requirements, kept with its rows at zero hours. No kickoff/design module: design hours sit on
+  the screen rows. In FILL mode the client's own columns and structure are kept.
+- **One language per workbook.** `language` is `en` or `vi`; every task text and every label
+  the builder writes follows it.
 - **No hours in this phase.** If you catch yourself writing a number per task, stop.
 
 ## When you are done

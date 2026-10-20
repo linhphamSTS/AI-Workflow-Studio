@@ -16,7 +16,10 @@ workbook solve exactly to `n * 15.0 + 0.75` for Calibri 11, so a line is a flat 
 and Excel allows only 0.75 pt of slack. That is why even a correctly auto-fitted cell
 reads tight against its border, and why this module adds real bottom padding instead.
 """
+import re
+
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.styles.colors import Color
 from openpyxl.utils import get_column_letter
 
 # --------------------------------------------------------------------- palette
@@ -158,6 +161,35 @@ def wrapped_lines(text, avail_px):
     return max(1, total)
 
 
+# House BA style: the label at the start of a line is bold, the text after it is not
+# ("Chức năng:", "1. Mục đích:", "Ràng buộc hệ thống:", "Assumption:", "Constraint:" ...).
+# Same labels in English ("Function:", "1. Purpose:", "Constraints:", "Tech solution:" ...).
+BOLD_LABEL = re.compile(
+    r'^(Chức năng:|Function:|\d+\. [^:\n]{1,40}:|Ràng buộc hệ thống:|Business rules:'
+    r'|Assumption:|Constraint:|Tech solution:|Bổ sung so với SOW:|Điều chỉnh so với SOW:'
+    r'|Added vs client SOW:|Changed vs client SOW:|Technical risk \(\w+\):'
+    r'|Rủi ro kỹ thuật \([^)\n]+\):)', re.M)
+
+
+def bold_labels(text):
+    """Plain text -> in-cell rich text with the line-start labels bold; text without a label stays str."""
+    from openpyxl.cell.rich_text import CellRichText, TextBlock
+    from openpyxl.cell.text import InlineFont
+    if not text or not BOLD_LABEL.search(text):
+        return text
+    bold = InlineFont(rFont=FONT, sz=SZ, b=True, color=Color('FF000000'))
+    plain = InlineFont(rFont=FONT, sz=SZ)
+    parts, pos = [], 0
+    for m in BOLD_LABEL.finditer(text):
+        if m.start() > pos:
+            parts.append(TextBlock(plain, text[pos:m.start()]))
+        parts.append(TextBlock(bold, m.group(1)))
+        pos = m.end()
+    if pos < len(text):
+        parts.append(TextBlock(plain, text[pos:]))
+    return CellRichText(parts)
+
+
 def autofit_row_heights(ws, widths, skip_rows=()):
     """Stamp an explicit height on every row so wrapped text is fully visible.
 
@@ -180,6 +212,8 @@ def autofit_row_heights(ws, widths, skip_rows=()):
         for col in range(1, ws.max_column + 1):
             cell = ws.cell(row, col)
             v = cell.value
+            if v is not None and not isinstance(v, (str, int, float)):
+                v = str(v)                       # rich text (bold labels) measures as its plain text
             if not isinstance(v, str) or v.startswith('='):
                 continue
             if not (cell.alignment and cell.alignment.wrap_text):

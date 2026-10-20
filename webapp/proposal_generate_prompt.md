@@ -28,9 +28,14 @@ not create or delete anything else under the folder.
 - **Confirmed plan:** `{{WORKSPACE_DIR}}/spec/plan.json` (tech stack, architecture, diagram set, sections).
 - **Source docs:** `{{FOLDER}}` and/or `{{WORKSPACE_DIR}}/inputs/`, plus the digest at
   `{{WORKSPACE_DIR}}/spec/_ingest_digest.md` if present.
+- **Proposal language:** `plan.json` `"language"` (`en` or `vi`), confirmed by the user at the
+  gate. Write every generated value in it (04_generate.md, Agent B, Language). If it is missing,
+  stop and say so: do not guess.
 - **Skill scripts (run, do not edit):** `{{PROPOSAL_SKILL_DIR}}/scripts/` —
-  `build_diagram.py`, `build_docx.py`, `format_reviewer.py`, `auto_fix.py`, `diagram_check.py`,
-  `drawio_export.py`, `diagrams_runtime.py`, `render_pages.py`.
+  `build_diagram.py`, `build_docx.py`, `finalize.py` (which runs `post_assembly.py`,
+  `auto_fix.py`, `format_reviewer.py`, `translate_vi.py`, `refresh_toc.py`,
+  `check_consistency.py`, `check_crossdoc.py`), `diagram_check.py`, `drawio_export.py`,
+  `diagrams_runtime.py`, `render_pages.py`.
 - **Template (copy, do not edit in place):** `{{PROPOSAL_SKILL_DIR}}/templates/proposal_template.docx`.
 
 ## What to do (follow the skill's own phases, output into the workspace)
@@ -42,11 +47,18 @@ strict format review, SharePoint-Online compatibility, heading spacing, no lefto
    `plan.json`. You MAY spawn parallel subagents exactly as that prompt describes (diagram-builder,
    content-writer, template-setup). Diagrams (PNG + optional .drawio) go to
    `{{OUTPUT_DIR}}/diagrams/` with a `diagrams.json` describing them.
-2. `{{PROPOSAL_SKILL_DIR}}/prompts/05a_assemble.md` — assemble the `.docx` by running the skill's
-   `build_docx.py` against a COPY of the template, the content `replacements.json`, and the
-   diagrams. Write the result to `{{OUTPUT_DIR}}/`.
-3. `{{PROPOSAL_SKILL_DIR}}/prompts/05b_format_review.md` — run `format_reviewer.py` + the `auto_fix.py`
-   loop (max 2 iterations) until 0 blockers, as that prompt specifies.
+2. `{{PROPOSAL_SKILL_DIR}}/prompts/05a_assemble.md` — assemble AND finish with ONE command,
+   `finalize.py`, exactly as that prompt specifies: `--docx "{{OUTPUT_DIR}}/<Project> - High Level
+   Technical Proposal.docx" --language <plan.language> --client "<plan.client>"
+   --replacements {{OUTPUT_DIR}}/replacements.json --diagrams {{OUTPUT_DIR}}/diagrams/diagrams.json
+   --plan {{WORKSPACE_DIR}}/spec/plan.json`, plus `--wbs <file>` when a WBS workbook is among the
+   source docs. Do not run `build_docx.py`, the review, the translation or the contents rebuild by
+   hand in another order. It must print `READY`.
+3. `{{PROPOSAL_SKILL_DIR}}/prompts/05b_format_review.md` — when `finalize.py` stops on review
+   issues, apply the fixes and the `auto_fix.py` loop (max 2 iterations) as that prompt specifies,
+   then re-run `finalize.py` (`--skip-build` when the fix was made on the assembled file). Then
+   render the pages (`render_pages.py`) and LOOK at every page: no script sees a figure printed
+   over the footer or a word left alone on a line.
 4. `{{PROPOSAL_SKILL_DIR}}/prompts/06_report.md` — run the report step INCLUDING the skill's own
    **self-learning**: append a lesson entry to `{{PROPOSAL_SKILL_DIR}}/LESSONS_LEARNED.md`, AND
    **promote** a general lesson into the relevant phase prompt (`04_generate.md` /
@@ -70,4 +82,10 @@ Rules:
   finishing (the skill's `format_reviewer.py` is the gate).
 - NEVER write anything under `{{PROPOSAL_SKILL_DIR}}`.
 
-When done, reply with one line: `PROPOSAL_WRITTEN <docx filename> | <n> diagram(s) | <k> blocker(s)`.
+- This run is head-less: when your turn ends, the run ends. If you spawn subagents, WAIT for
+  every one of them to report before you assemble, and never end your turn while a subagent or
+  a background command is still running.
+- The final `.docx` is the ONLY `.docx` directly in `{{OUTPUT_DIR}}/`; `finalize.py` keeps its
+  working copies under `{{OUTPUT_DIR}}/_work/`.
+
+When done, reply with one line: `PROPOSAL_WRITTEN <docx filename> | <n> diagram(s) | <k> blocker(s) | <language>`.

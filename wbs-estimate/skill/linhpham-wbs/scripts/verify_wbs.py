@@ -19,6 +19,7 @@ that the work is there. The report prints per-requirement hit counts and the thi
 coverage so a requirement covered once, in passing, is visible for review.
 """
 import argparse
+import copy
 import json
 import os
 import re
@@ -84,6 +85,16 @@ def main():
     cols = spec['columns']
     leaves = wbs_schema.leaf_rows(spec)
     print('Leaf tasks : %d' % len(leaves))
+    # The hours that ship are the spec AFTER the factor layer (zeros, competitive, floors).
+    # Sanity figures and the workbook comparison read these, never the raw spec, or the
+    # report describes a file that was not built.
+    import build_wbs as _bw
+    shipped = copy.deepcopy(spec)
+    try:
+        _bw.apply_factors(shipped)
+    except Exception as ex:  # noqa: BLE001 - an invalid spec is already reported above
+        print('factor layer could not run: %s' % ex)
+    final = {str(r['id']): r for r in wbs_schema.leaf_rows(shipped)}
 
     # ---------------------------------------------------------------- traceability
     print()
@@ -172,7 +183,7 @@ def main():
                    for c in range(2, 2 + n_eff + 1)),
                'no Cover formula was found, so this check proved nothing')
     first_eff, total_col = 6, 6 + n_eff
-    written, zero_written, total_leaf_rows = [], [], 0
+    written, zero_written, total_leaf_rows, drift = [], [], 0, []
 
     for name in sheet_names:
         ws = wb[name]
@@ -182,7 +193,7 @@ def main():
         leaf_rows_, sec_rows, total_row = [], [], None
         for r in range(3, ws.max_row + 1):
             v = ws.cell(r, 1).value
-            if ws.cell(r, 2).value == 'TOTAL' and v is None:
+            if ws.cell(r, 2).value in ('TOTAL', 'TỔNG CỘNG') and v is None:
                 total_row = r
                 continue
             t = '' if v is None else str(v)
@@ -254,27 +265,49 @@ def main():
                    'TOTAL must add the module rows, not a range that also spans them')
 
         for r in leaf_rows_:
+            got = {}
             for c in range(first_eff, total_col):
                 v = ws.cell(r, c).value
                 if isinstance(v, (int, float)):
                     written.append((name, r, get_column_letter(c), v))
+                    got[cols[c - first_eff]] = int(v)
+            rid = str(ws.cell(r, 1).value).strip()
+            want = {c: int(final[rid].get(c) or 0) for c in cols
+                    if rid in final and final[rid].get(c)}
+            if rid not in final or got != want:
+                drift.append('%s %s: workbook %s, spec %s' % (tag, rid, got, want))
 
+        capped = [str(ws.cell(r, 1).value) for r in range(3, ws.max_row + 1)
+                  if (ws.row_dimensions[r].height or 0) >= 409.0]
+        ck.add('%s: no row hits Excel\'s 409pt ceiling' % tag, not capped,
+               '%s: %d row(s) at the ceiling, text below it is cut off: %s'
+               % (tag, len(capped), ', '.join(capped[:6])))
         no_h = [r for r in range(1, ws.max_row + 1) if ws.row_dimensions[r].height is None]
         ck.add('%s: every row has a stamped height' % tag, not no_h,
                '%s rows without a height: %s (SharePoint will clip them)'
                % (tag, no_h[:6]))
-        clipped = header_fits(ws, WIDTHS)
+        # The widths the sheet really has: the effort columns follow their labels now,
+        # so a fixed letter table checks the wrong width once a column is added.
+        clipped = header_fits(ws, {get_column_letter(c): ws.column_dimensions[
+            get_column_letter(c)].width or WIDTHS.get(get_column_letter(c), 8.43)
+            for c in range(1, total_col + 1)})
         ck.add('%s: every column header fits' % tag, not clipped,
                '%s: %s' % (tag, '; '.join(clipped[:3])))
 
+        # Any assumption block may come first: a task with only a constraint leaves the
+        # empty "Assumption:" block out, as the house style says.
+        first_block = re.compile(r'(Assumption|Constraint|Tech solution|Bổ sung so với SOW|'
+                                 r'Điều chỉnh so với SOW|Added vs client SOW|'
+                                 r'Changed vs client SOW|Technical risk \(\w+\)|Rủi ro kỹ thuật \([^)]+\)):')
         ck.add('%s: column E carries the assumptions' % tag,
-               all(str(ws.cell(r, 5).value or '').startswith('Assumption')
-                   for r in leaf_rows_),
-               '%s has a leaf whose column E does not start with the assumptions' % tag)
+               all(first_block.match(str(ws.cell(r, 5).value or '')) for r in leaf_rows_),
+               '%s has a leaf whose column E does not start with an assumption block' % tag)
 
     if not a.fill:
         ck.add('leaf rows across sheets match the spec', total_leaf_rows == len(leaves),
                'workbook has %d leaf rows, spec has %d' % (total_leaf_rows, len(leaves)))
+        ck.add('every hour in the workbook is the spec after the factor layer', not drift,
+               '%d task(s) differ: %s' % (len(drift), '; '.join(drift[:4])))
     ck.add('all written hours are whole numbers',
            all(float(v) == int(v) for _n, _r, _c, v in written),
            'fractional: %s' % [x for x in written if float(x[3]) != int(x[3])][:5])
@@ -324,9 +357,10 @@ def main():
             for r in range(3, ws.max_row + 1):
                 rid = ws.cell(r, 1).value
                 if rid is not None and ws.cell(r, 3).value:
-                    rendered[str(rid)] = ws.cell(r, 5).value or ''
+                    rendered[str(rid)] = str(ws.cell(r, 5).value or '')  # rich text -> plain
         missing = [str(r['id']) for r in with_risk
-                   if 'Technical risk (' not in rendered.get(str(r['id']), '')]
+                   if 'Technical risk (' not in rendered.get(str(r['id']), '')
+                   and 'Rủi ro kỹ thuật (' not in rendered.get(str(r['id']), '')]
         ck.add('every registered risk is rendered in column E', not missing,
                'risk block missing for: %s' % ', '.join(missing[:8]))
 
@@ -382,20 +416,26 @@ def main():
     upward = [f for f in factors if (f.get('final') or 0) > (f.get('base') or 0)]
     downward = [f for f in factors if (f.get('final') or 0) < (f.get('base') or 0)]
     unc = (spec.get('uncertainty') or {}).get('factor')
-    has_upward = bool(upward) or (unc and unc > 1.0)
+    # Uplifts written straight into the base hours are legitimate, like the AI factor's
+    # 'in_base'; the spec must then say so in words, so the decision is still on record.
+    in_base = str(spec.get('uplifts_in_base') or '').strip()
+    has_upward = bool(upward) or (unc and unc > 1.0) or bool(in_base)
 
     # Only demand an uplift where the estimate itself says one is owed. A project with no
     # external interface genuinely needs none, and a blanket rule would cry wolf on it.
+    # Counted nouns are integration nouns only: "3 product IDs", "11 roles" or "the two
+    # systems" are not a count of external things to price.
     OWES = re.compile(
-        r'\b(two|three|four|five|\d+)\s+\w*\s*'
-        r'(integration|integrations|interface|interfaces|gateway|gateways|bank|banks|'
-        r'authority|authorities|rail|rails|partner|partners|provider|providers|'
-        r'product|products|system|systems)\b', re.I)
+        r'\b(two|three|four|five|six|\d+)\s+(?:\w+\s+){0,2}'
+        r'(integrations?|interfaces?|gateways?|banks?|authorities|authority|rails?|'
+        r'providers?|external services?|third-party services?|APIs)\b', re.I)
     owed = []
     for leaf in leaves:
-        text = ' '.join(str(leaf.get(k) or '') for k in ('assum', 'desc', 'feature'))
+        if wbs_schema.is_zeroed(leaf, spec):
+            continue
+        text = ' '.join(str(leaf.get(k) or '') for k in ('assum', 'feature'))
         m = OWES.search(text)
-        if m and not any(str(f['id']) == str(leaf['id']) for f in factors):
+        if m and not in_base and not any(str(f['id']) == str(leaf['id']) for f in factors):
             owed.append('%s (%s)' % (leaf['id'], m.group(0).strip()))
 
     # An empty factor table must NOT pass this vacuously. That is precisely the state the bid
@@ -403,12 +443,14 @@ def main():
     # numbers as the estimating phase intends, so the factor table was empty and there was
     # nothing to look one-sided. The integration buffer is owed on every task that talks to
     # something outside the estate, so the presence of such a task is what makes the demand.
+    # Read the task NAME only: descriptions mention "API Gateway", "payment status" or
+    # "approval authority" on tasks that integrate with nothing.
     INTEGRATES = re.compile(
-        r'\b(integrat\w*|gateway|webhook|connector|third.part\w*|external|api of|sso|'
-        r'oauth|soap|sftp|erp|hrms|payment|acquirer|authority|bank|partner system)\b', re.I)
+        r'\b(integrat\w*|payment gateway|webhook|connector|third.part\w*|sso|'
+        r'oauth|soap|sftp|erp|hrms|acquirer|partner system)\b', re.I)
     integrating = [str(l['id']) for l in leaves
-                   if INTEGRATES.search(' '.join(str(l.get(k) or '')
-                                                 for k in ('assum', 'desc', 'feature')))]
+                   if not wbs_schema.is_zeroed(l, spec)
+                   and INTEGRATES.search(str(l.get('feature') or ''))]
     ck.add('the factor stack moves in both directions, not only down',
            has_upward or not integrating,
            'the factor table has %d downward and %d upward entries while %d task(s) integrate '
@@ -428,11 +470,14 @@ def main():
     print('=' * 78)
     print('4. SANITY (report, not pass/fail: an outlier is a question to answer)')
     print('=' * 78)
+    leaves = list(final.values()) or leaves          # the hours that ship
     grand = sum(r.get(c) or 0 for r in leaves for c in cols)
     cells = sum(1 for r in leaves for c in cols if r.get(c))
+    live = [r for r in leaves if any(r.get(c) for c in cols)]
     if grand and cells:
         print('  Total                       : %d h' % grand)
-        print('  Average per leaf task       : %.1f h   (target 4-7)' % (grand / len(leaves)))
+        print('  Average per leaf task       : %.1f h   (target 4-7; %d task(s) with hours, '
+              'zeroed rows left out)' % (grand / len(live), len(live)))
         print('  Average per populated cell  : %.1f h   (target 4-7)' % (grand / cells))
         for c in cols:
             s = sum(r.get(c) or 0 for r in leaves)
@@ -449,7 +494,7 @@ def main():
         print('  Infrastructure share        : %.1f%%  (target 8-12; below 5 usually means '
               'setup is missing, above 15 usually means it is over-built)'
               % (100.0 * infra / grand))
-        nfr_mod = [m for m in sorted({wbs_schema.module_of(r) for r in leaves})][-1:]
+        nfr_mod = [m for m in sorted({wbs_schema.module_of(r) for r in leaves}, key=int)][-1:]
         if nfr_mod:
             nfr = sum(r.get(c) or 0 for r in leaves for c in cols
                       if wbs_schema.module_of(r) == nfr_mod[0])
@@ -543,8 +588,14 @@ def check_against_reference(spec, leaves, cols, ck):
         tw = {w for w in re.findall(r'[a-z]{4,}', text)}
         if not tw:
             continue
+        if wbs_schema.is_zeroed(leaf, spec):
+            continue
         best, hit = 0.0, None
         for words, be, fe in ranges:
+            # At least two shared words: one word ("support") matched "UAT support"
+            # against "Trust & Support" and "Table + format support".
+            if len(words & tw) < 2:
+                continue
             score = len(words & tw) / len(words)
             if score > best:
                 best, hit = score, (words, be, fe)
@@ -556,7 +607,8 @@ def check_against_reference(spec, leaves, cols, ck):
             if col not in cols or not rng:
                 continue
             floor = rng[0] * scale
-            got = leaf.get(col) or 0
+            # The reference prices infrastructure as BE; the house sheet books it as Devops.
+            got = (leaf.get(col) or 0) + ((leaf.get('devops') or 0) if col == 'be' else 0)
             if got and got < floor * 0.75:
                 under.append('%s %s=%d, the reference gives %d-%d for "%s" (x%.2f = %.1f)'
                              % (leaf['id'], col, got, rng[0], rng[1],

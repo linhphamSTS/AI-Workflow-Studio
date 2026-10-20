@@ -333,6 +333,16 @@ name. Column 2: `**<Choice>** (hard|soft). <RFP § quoted source>. **Rejected** 
 | Backend  | …                                                               |
 ```
 
+> **In `plan.json`, a rejected CLOUD is described, not named** (2026-10-20). `check_consistency.py`
+> scans every `tech_stack` string, rationale included, for provider names, so "Rejected: Azure or
+> GCP (no reason to go against the client's preference)" fails "exactly one cloud provider is
+> named anywhere". `finalize.py` runs that gate LAST, so the failure costs a full assemble,
+> review, translation and contents rebuild before it shows. Write the rejection by what it failed:
+> "another hyperscaler (no reason to go against the client's stated preference)". Rejected
+> NON-cloud alternatives (Kafka, Keycloak, Flutter) stay named; they are not in the cloud
+> vocabulary. **⚠ NEEDS CODE PROMOTION: `check_consistency.py` should ignore a provider named only
+> inside a `Rejected:` / `Loại:` clause.**
+
 Same 2-col shape as §1b + §4. Always English. Re-derive every line from
 THIS bid — do NOT copy products from prior examples.
 
@@ -710,7 +720,13 @@ or contingent on info the RFP didn't provide.
 - No region-name reveals unless the client stated a region.
 - No phase plans / sprint plans — that's the commercial bid pack, not this doc.
 - No specific pricing — that's the commercial bid pack.
-- Vietnamese RFP -> Vietnamese output. English RFP -> English output. Mixed -> match the RFP's predominant language.
+- **Proposal language is a decision, not a guess: `en` or `vi`.** Propose one in the brief
+  (Vietnamese RFP or a Vietnamese client -> `vi`; English RFP -> `en`; mixed -> the RFP's
+  predominant language), and the Phase 3 gate confirms it. It is written to `spec/plan.json` as
+  `"language": "en"` or `"language": "vi"` and decides the whole downstream path: what language
+  the content agents write in, and whether `finalize.py` runs the Vietnamese pass. One language
+  per document, never mixed; technical keywords (Cloud Run, CI/CD, User Acceptance Testing) stay
+  in English inside Vietnamese text.
 
 ## Senior judgment checks (before finishing)
 

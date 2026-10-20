@@ -9,8 +9,21 @@ confirmation.
 
 ## How to present
 
-Output the full `proposal_brief.md` content, then use AskUserQuestion with
-these four options:
+Output the full `proposal_brief.md` content, then use AskUserQuestion with TWO questions in the
+same call.
+
+**Question 1 — proposal language** (always asked, even when the RFP's language looks obvious):
+`English` or `Tiếng Việt`, the brief's proposal first and marked (Recommended). Record the answer
+as `"language": "en"` or `"language": "vi"` in `spec/plan.json`. The two paths differ from here:
+
+| | English (`en`) | Tiếng Việt (`vi`) |
+|---|---|---|
+| Content agents write | English | Vietnamese, technical keywords kept in English |
+| Template prose (process, UAT, cover, headings) | stays as shipped | translated by `translate_vi.py` after the review |
+| `finalize.py --language` | `en` | `vi --client "<client name>"` |
+| Contents page | rebuilt by Word | rebuilt by Word, after translation |
+
+**Question 2 — the brief**, with these four options:
 
 1. **OK, proceed to generation** — Phase 4 starts.
 2. **Adjust tech stack** — ask follow-up: which layer, what to change. Examples: "swap backend to Java / Spring Boot", "drop Aurora, use DynamoDB", "replace EKS with Lambda", "use Azure instead of AWS". Loop back to Phase 2 with the adjustment noted in `requirements.json.constraints.tech_stack_forced` — Phase 2 must re-derive the architecture around the user's choice, not just slot in the new name.

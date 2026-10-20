@@ -666,6 +666,7 @@ const App = (() => {
     $('#plan-body').innerHTML = `
       ${plan.summary ? `<div class="summary">${ic('info')}<span>${esc(plan.summary)}</span></div>` : ''}
       ${plan.project ? `<div class="review-count">Project: <b>${esc(plan.project)}</b></div>` : ''}
+      ${languagePicker(plan)}
       ${stackBlock}
       ${plan.architecture ? `<div class="hs-t" style="margin:16px 0 6px">Architecture</div><div class="rat" style="white-space:pre-wrap">${esc(plan.architecture)}</div>` : ''}
       ${dgs ? `<div class="hs-t" style="margin:16px 0 8px">${(plan.diagrams || []).length} diagram(s) in the proposal</div>${dgs}` : ''}
@@ -680,6 +681,38 @@ const App = (() => {
         <button class="btn primary lg" onclick="App.generate()">${ic('play')} Generate proposal (.docx)</button>
       </div>`;
   }
+  // ---------- proposal language ----------
+  // One language per document, decided here rather than guessed from the RFP. It decides
+  // what the content is written in and whether the generate step runs the Vietnamese pass
+  // (template prose translated after the review, contents rebuilt after the translation).
+  function planLang(plan) {
+    const l = String((plan && plan.language) || '').trim().toLowerCase();
+    return l.startsWith('vi') ? 'vi' : (l.startsWith('en') ? 'en' : '');
+  }
+  function languagePicker(plan) {
+    const cur = planLang(plan);
+    const why = plan.language_reason ? `<em>${esc(plan.language_reason)}</em>` : '';
+    const opt = (k, label) => `<label class="secrow"><input type="radio" name="plang" value="${k}"
+        ${cur === k ? 'checked' : ''} onchange="App.setLanguage('${k}')">
+        <span class="secmeta"><b>${label}</b></span></label>`;
+    return `<div class="hs-t" style="margin:14px 0 4px">Proposal language
+        <span class="seccount" id="lang-count">${cur ? (cur === 'vi' ? 'Tiếng Việt' : 'English') : 'not chosen'}</span></div>
+      <div class="sub" style="margin-bottom:8px">The whole document is written in one language.
+        Tiếng Việt keeps technical keywords in English. ${why}</div>
+      <div class="secpick"><div class="secgrp">${opt('en', 'English')}${opt('vi', 'Tiếng Việt')}</div></div>`;
+  }
+  async function setLanguage(lang) {
+    const p = planCache || {};
+    p.language = lang;
+    planCache = p;
+    const ta = $('#plan-json');
+    if (ta) ta.value = JSON.stringify(p, null, 2);
+    const n = $('#lang-count');
+    if (n) n.textContent = lang === 'vi' ? 'Tiếng Việt' : 'English';
+    try { await api('PUT', '/api/workspaces/' + current + '/plan', p); }
+    catch (e) { toast(e.message, true); }
+  }
+
   // ---------- optional bid sections ----------
   // Not every RFP asks for a team page, a roadmap or an SLA table. Each of these
   // sections is opt-in: analyze pre-ticks the ones the RFP requires and explains why,
@@ -709,7 +742,7 @@ const App = (() => {
         }).join('')}
       </div>`).join('');
     return `<div class="hs-t" style="margin:18px 0 4px">Optional sections
-        <span class="seccount">${on} of ${sectionCatalogue.length} selected</span></div>
+        <span class="seccount" id="sec-count">${on} of ${sectionCatalogue.length} selected</span></div>
       <div class="sub" style="margin-bottom:10px">Ticked from what the RFP asks for. Untick anything
         this client did not request: an unticked section is left out of the document entirely.</div>
       <div class="secpick">${body}</div>`;
@@ -723,7 +756,7 @@ const App = (() => {
     planCache = p;
     const ta = $('#plan-json');
     if (ta) ta.value = JSON.stringify(p, null, 2);
-    const n = $('.seccount');
+    const n = $('#sec-count');
     if (n) {
       const c = sectionCatalogue.filter(s => (p.optional_sections[s.key] || {}).include).length;
       n.textContent = `${c} of ${sectionCatalogue.length} selected`;
@@ -1020,6 +1053,6 @@ const App = (() => {
   return { newWorkspace, saveAndRefine, generate, exportZip, del, zoom, rmFile,
            saveManifest, backToInputs, pickFiles, pickFolder, browseFolder,
            viewVersion, toggleCompare, setCmp, iterateFrom, openHistory, closeHistory, openHelp,
-           savePlan, reopenPlan, saveWbsPlan, reopenWbsPlan, showStack, stop, rename,
+           savePlan, reopenPlan, saveWbsPlan, reopenWbsPlan, showStack, stop, rename, setLanguage,
            toggleSection };
 })();

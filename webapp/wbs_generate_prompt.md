@@ -31,7 +31,13 @@ needs a code change is recorded as `⚠ NEEDS CODE PROMOTION: <file> — <what>`
 ### 1. The work breakdown
 
 `{{OUTPUT_DIR}}/WBS_<Project>.xlsx`, built by `build_wbs.py` from a `wbs.json` you write
-against `wbs_schema.py`. In FILL mode do not use the generic builder: open the client's own
+against `wbs_schema.py`, in the house style of `04_estimate.md`: the six columns
+`["ui","devops","be","fe","mob","ai"]`, infrastructure hours in `devops`, module 1
+Infrastructure and the last module Non-Functional Requirements at zero (`zero_modules`),
+UI/UX hours on the screen rows, the Description/Assumptions frames, whole hours, `group` on
+every leaf, and `"lang"` set to the plan's `language` so every label is in one language.
+`verify_wbs.py` must pass, including "every hour in the workbook is the spec after the factor
+layer". In FILL mode do not use the generic builder: open the client's own
 workbook with openpyxl and write ONLY into the effort columns, leaving their structure,
 wording and formatting untouched.
 
@@ -47,6 +53,10 @@ python scripts/cloud_prices.py --provider <from the plan> --region <from the pla
 python scripts/cloud_prices.py --provider <...> --region <...> --out prices.json
 python scripts/build_cost.py --prices prices.json --sizing sizing.json --out "Cost Estimation - <Project>.xlsx"
 ```
+
+This run is head-less: when your turn ends, the run ends. If you spawn subagents, WAIT for every
+one of them to report before you build, and never end your turn while a subagent or a
+background command is still running.
 
 Rules that make the cost sheet defensible:
 

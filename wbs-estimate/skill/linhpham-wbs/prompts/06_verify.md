@@ -11,8 +11,11 @@ comparing the estimate to the vendor and not to itself:
 ```
 python scripts/cloud_prices.py --provider <aws|azure> --region <region> \n       --out prices_recheck.json
 python scripts/verify_cost.py --sizing sizing.json \n       --xlsx "Cost Estimation - <Project>.xlsx" \n       --prices prices_recheck.json | tee _verify_cost.txt
-python scripts/calibrate_cost.py --sizing sizing.json \n       --xlsx "Cost Estimation - <Project>.xlsx" --prices prices_recheck.json
+python scripts/calibrate_cost.py --sizing sizing.json \n       --xlsx "Cost Estimation - <Project>.xlsx" --prices prices_recheck.json \n       --today <YYYY-MM-DD, today>
 ```
+
+Pass `--today`. The script defaults it to a fixed past date, so a workbook priced after that
+date looks "priced in the future" and the CLEAN workbook fails before any fault is injected.
 
 Omitting `--prices` does not skip the freshness checks, it FAILS them. A list price
 carried forward under today’s date is the one defect a reader cannot possibly spot,

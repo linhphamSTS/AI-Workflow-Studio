@@ -45,6 +45,84 @@ line rather than padding.
 
 <!-- Newest entry directly below this line. -->
 
+### Healthcare platform (clinic network), authored from an RFP + Q&A + integration inventory — 2026-10-20
+- **Shape and total:** 1 cross-platform mobile app + 3 web targets (patient portal, clinic staff
+  portal with offline check-in, head-office back-office), 11 modules, 165 leaves, **2,069h**,
+  AUTHOR mode. Platform & integrations 1,182h (57%). Cloud: AWS ap-southeast-1, USD 4,475/month
+  at launch (list prices, 3 environments).
+- **Factors applied:** AI factor in base (blended x0.76); 38 explicit upward entries: integration
+  buffer on 15 external leaves, no-sandbox x1.3 + legacy x1.3/x1.5 on the authority SOAP service
+  and the HL7 v2/MLLP hospital, legacy x1.3 on MySQL 5.6 extraction and deduplication, Decree 13
+  compliance x1.3, selective requirement-unclear x1.15 on 6 journeys, bundled N=3 on the app's
+  payment handlers. Competitive held at x1.0 (fixed price, unsettled requirements).
+- **What the estimate nearly got wrong:** the cross-border transfer impact assessment, which the
+  Q&A says the VENDOR prepares, had no task with hours (only a zeroed NFR row). The
+  thinnest-coverage table showed it at 10h borrowed from the consent task; a 12h task was added.
+- **What the cost estimate nearly got wrong (all found by reading meters, not names):**
+  1. The gate plan said Nova 2.0 runs in-region; in ap-southeast-1 Nova 2.0 has ONLY
+     `cross-region-global` meters. Priced Nova Pro (in-region) and raised it as a residency
+     decision for the client.
+  2. Three wrong availability claims in the plan: Nova 2.0 "in-region", Chime SDK "not in the
+     index", SQS "not in the index".
+  3. usageType is not unique (EC2 BoxUsage shared across Linux/RHEL/SUSE/Ubuntu Pro; RDS
+     `UnusedBox` at the instance price; tiered S3/DT/CW rows). Every key was written as exact
+     filters that must resolve to ONE distinct price.
+  4. The Glacier Deep Archive storage meter is absent in ap-southeast-1 (retrieval fees
+     present). CloudFront edge and Route 53 zones are only in the GLOBAL offer files.
+- **Verifier findings:** WBS 76/76 and cost 39/39 on first build. Calibration failed on the
+  CLEAN workbook because `calibrate_cost.py --today` defaults to 2026-07-29; with `--today` set,
+  9/9 faults were caught. The gates check row heights only on line-item sheets, so a separate
+  audit stamped-checked all 15 sheets and evaluated every Cover total against the model.
+- **Reusable figures (for reference/lessons_learned.md, which this run may not edit):**
+  - Cloud infrastructure, 3 environments on EKS: 161h.
+  - Shared platform services for 4 front-ends: 453h. This covers identity with OTP, the
+    booking engine with a virtual waiting room, the live queue, e-prescription,
+    telemedicine sessions, the notification hub and Decree 13 compliance.
+  - Payments: 143h for 3 gateways, ledger, refunds, reconciliation, e-invoice and ERP SFTP.
+  - Integrations: 163h for 9 systems. These are an authority SOAP service, 3 HIS (2 FHIR R4
+    and 1 HL7 v2), eKYC, delivery, SMS, ZNS and a resilience layer.
+  - AI: 122h (76h in the AI column) for a triage chatbot and prescription OCR with
+    pharmacist review.
+  - Migration of 1.8M patients and 6.5M visits with deduplication: 140h.
+  - Front-ends:
+    - cross-platform patient app with NFC eKYC and video, 23 screens: 327h;
+    - patient web: 93h;
+    - staff portal with offline mode: 225h;
+    - back-office: 242h.
+  - Back-end vs client: 63/37.
+- **Promoted to:**
+  - `prompts/05_build.md`: a new section on selecting a meter. It covers non-unique
+    usageTypes, residency read from the meter suffix, global offers and absent meters,
+    re-checking plan claims, and re-checking against the current offer version.
+  - `prompts/04_estimate.md`: a self-check that every non-software vendor deliverable has
+    hours.
+  - `prompts/06_verify.md`: pass `--today` to calibrate_cost.
+- ⚠ NEEDS CODE PROMOTION: `scripts/cloud_prices.py`. The cache is keyed by service name, not
+  offer version, so a "re-fetch" re-reads the same file forever. Also, `--out` never
+  populates `prices`. Add a declarative key spec (service, exact filters, unit multiplier)
+  resolved deterministically by both the fetch and the recheck, with exactly-one-price
+  enforcement and version-keyed caching. This run's
+  `webapp/workspaces/f196f2555a45/output/versions/1/_tools/extract_prices.py` is a working
+  model, including the global-offer path.
+- ⚠ NEEDS CODE PROMOTION: `scripts/build_all.py`. Step 2's re-fetch overwrites
+  `prices_recheck.json` with an empty `prices`, so the cost gate can only pass with
+  `--skip-price-refetch`.
+- ⚠ NEEDS CODE PROMOTION: `scripts/calibrate_cost.py`. The `--today` default is hard-coded to
+  '2026-07-29'; use `date.today()`.
+- ⚠ NEEDS CODE PROMOTION: `scripts/verify_cost.py` and `scripts/verify_wbs.py`. Run the
+  row-height check on EVERY sheet, not only the environment and line-item sheets. The
+  sheets currently skipped are Cover, Optimisation, Third-Party, Price Sources and Out of
+  Scope.
+- ⚠ NEEDS CODE PROMOTION: `scripts/build_cost.py`. Add `mature_qty` and `rebase_signal` per
+  line so launch-vs-mature is a column, not prose in the configuration cell.
+- ⚠ NEEDS CODE PROMOTION: `scripts/verify_wbs.py`. The "Mobile vs front-end web" ratio
+  compares one app with the sum of N web targets (0.66x here). Compare per target.
+- ⚠ NEEDS PROMOTION (reference/, human): add the figures above to `reference/lessons_learned.md`.
+
+### House writing style for Description and Assumptions adopted — 2026-10-20
+- **What changed:** descriptions move from loose bullets to a fixed frame by task type (Chức năng / Mục đích / Đối tượng / Thao tác or Điều kiện kích hoạt / Thành phần giao diện / Trường dữ liệu / Xử lý / Ràng buộc), assumptions to five ordered blocks, line labels bold inside the cell, the module on every row, and UI/UX hours on the screen task itself rather than in a separate design section.
+- **Promoted to:** `prompts/04_estimate.md` (the style, the format and a self-check list) and `scripts/xlsx_style.py` / `build_wbs.py` (bold labels, Devops column label, row heights that measure rich text). Project-specific content stays in the project's own notes, not in this skill.
+
 ### Three products on one shared platform, authored from an RFP with no client WBS — 2026-07-28
 - **Shape and total:** 3 mobile + 4 web front-end targets, 6 modules, 264 leaf tasks,
   4,108 hours after zeroing UI/UX and the non-functional module. AUTHOR mode: the client
@@ -265,3 +343,40 @@ in `05_build.md` were reported missing.
 
 Grep is for locating text. Deciding whether a concept is present is reading work. When the
 two disagree, the reading wins.
+
+### 2026-10-20 — A house style taken from one bid must be tested on the others before it is a rule
+
+The writing style in `prompts/04_estimate.md` was promoted from a single WBS. Regenerating six
+earlier WBS through the skill, keeping every task and hour, showed what was specific to that one
+bid and what the builder and verifier had wrong all along:
+
+* **The builder changed hours on its own.** `apply_floors` ran on every build, even with no
+  discount, and matched keywords anywhere in the description and group, so rewording a
+  description moved the hours (a group named "Onboarding & Authentication" turned a 3h task into
+  6h). Five of six regenerated WBS came out 4-37h above their source. Floors now apply only to a
+  task the competitive factor reduced, never above its pre-factor hours, matching whole words in
+  the Feature name.
+* **The verifier read the spec, not the workbook**, so that drift passed every check. It now
+  re-runs the factor layer and compares every leaf cell with the result, and reports sanity
+  figures from the hours that ship.
+* **Declared zeros were refused.** The Non-Functional module kept at zero, or a section zeroed at
+  the gate, failed the schema's all-zero rule although `zero_modules` was set. `zero_modules`
+  now exempts its rows and accepts a section prefix.
+* **The style contradicted the verifier**: the style said to leave out empty assumption blocks,
+  the verifier required column E to start with `Assumption`. Any block may now come first.
+* **What one bid did differently was not the house style.** Its module 1 was kickoff and design,
+  where every other WBS starts with infrastructure and ends with a zeroed Non-Functional module.
+  The module order is now stated, and the description frame has English labels for the WBS
+  that are written in English.
+* **Checks that cried wolf**: "support" matched "UAT support" on one shared word, "payment" or
+  "API Gateway" in a description counted as an integration, "3 product IDs" as a bundled
+  integration. Matching now needs two shared words, reads the Feature name, and counts
+  integration nouns only. Real bundles (four banks in one row, five external services in one
+  row) are still caught.
+* **Rows taller than Excel's 409pt ceiling** passed because only "has a height" was checked.
+  The verifier now fails a row at the ceiling.
+* **One language per workbook.** The builder wrote its Cover, Out of Scope, sheet headers,
+  effort labels and risk block in English whatever language the tasks were in, so a
+  Vietnamese WBS came out half English. Every builder label now comes from a per-language table
+  (`TEXT` in `build_wbs.py`), chosen by `lang` or detected from the task text; `column_labels`
+  is honoured only for a client-supplied WBS.

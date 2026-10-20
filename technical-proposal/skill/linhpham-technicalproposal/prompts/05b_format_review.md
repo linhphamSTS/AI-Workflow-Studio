@@ -115,11 +115,74 @@ Run order matters and is not idempotent: `build_docx.py`, then any post-assembly
 > into plain text), the repair script runs **after `build_docx.py` and before `auto_fix.py`**, then
 > render and review as normal. Such a patch is NOT idempotent against a rebuild, so re-running Phase
 > 5a silently reinstates the defect — the same trap as the spacing auto-fix rule above, different
-> patch. Keep the script in the run's own `specs/` folder, never in the skill, and list it in the
-> Phase 6 report so the fix is visible rather than mysterious. Prefer binding a real `w:hyperlink` to
+> patch. The case-study sentence, prose spacing, template table rows and page header are now
+> repaired by `scripts/post_assembly.py` inside `finalize.py`; a NEW repair a run discovers goes in
+> the run's own `specs/` folder, runs through `finalize.py --post <script>` (it gets the docx path), is listed
+> in the Phase 6 report, and is recorded for promotion into `post_assembly.py`. Prefer binding a real `w:hyperlink` to
 > a new external relationship in `word/_rels/document.xml.rels` over rebuilding a HYPERLINK field: a
 > relationship-backed link renders as a link the moment the file opens, and a field is what the
 > run-merge destroyed in the first place.
+
+> **A proposal delivered in another language: review first, translate second, then rebuild the TOC.**
+> The skill writes and checks in English, so a run delivered in Vietnamese adds a translation pass
+> and a contents rebuild, and the order matters for four reasons, all measured on one run:
+> 1. **Run `format_reviewer --strict` BEFORE translating.** `uat_terms_incomplete` and
+>    `narrative_length_not_measured` match English phrases; on the translated file they fire as a
+>    blocker and a minor while all four UAT terms (14 days, silence means accepted, the 3-week fix
+>    window, evidence for a rejection) are present in the translated text. Keep a backup of the
+>    reviewed English file next to the output.
+> 2. **The template's contents page is a stale cache from another bid** (English titles, sections the
+>    proposal does not have, page numbers "?"). SharePoint and every preview show the cache, so it has
+>    to be rebuilt by Word (`TablesOfContents.Update` + `Fields.Update` + Save), after translation.
+>    Before Word opens the file, inject `<w:doNotAutoCompressPictures/>`; after the save, re-add the
+>    settings flags Word stripped. To verify the pictures, compare the dimensions of the pictures the
+>    document DISPLAYS (follow each `r:embed` through the part's rels). Do not count `word/media`
+>    parts: build_docx leaves about 35 orphaned template pictures behind, Word drops them on save, and
+>    a part count reports them as 35 re-encoded images.
+> 3. **The rebuilt contents lists the cover.** The template styles the cover title and "Content" as
+>    Heading 1 and the two party names in the ISSUED TO / FROM table as Heading 6. A style BASED ON a
+>    built-in heading does not help: Word locks its outline level to the heading's and the field's
+>    `\u` switch pulls it back in, and a paragraph-level `outlineLvl` is ignored too. What works is a
+>    standalone copy of the heading style (same pPr and rPr, no `basedOn` heading, no `outlineLvl`).
+>    The same template also types "Project Coordinator" twice in the FROM cell.
+> 4. **Set the TOC 1-6 styles to single line spacing through Word** (`doc.Styles(-20 - lvl)`), not
+>    from python-docx: they inherit Normal's 1.15, which pushed a 38-entry contents two lines onto a
+>    second page. Adding space after made it worse. Word keeps its own per-level indents this way.
+>
+> **PROMOTED TO CODE 2026-10-20:** `finalize.py` runs this order for both languages (the language
+> is a gate decision in `plan.json`); `translate_vi.py` translates, `refresh_toc.py` rebuilds the
+> contents for EVERY proposal (the stale cache is in the template, not in the translation), moves
+> the cover off the heading styles, sets single spacing and checks every entry names a real
+> heading; `format_reviewer` reads the UAT terms and the narrative headings in Vietnamese too.
+> Still open: fixing the cover styles in the template itself.
+>
+> **`translate_vi.py` leaves five optional-section headings in English** (2026-10-20): `Team
+> Structure`, `Roles & Responsibilities`, `Milestones & Acceptance`, `Support Model`,
+> `References`. Its siblings (`Lộ trình triển khai`, `Mục tiêu mức dịch vụ (SLA)`) are translated,
+> so the contents page reads half and half. No check sees it. Repair it in the DELIVERED file, AFTER
+> `finalize.py` prints READY, through a run-local script. Then re-run `refresh_toc.py` (the old
+> entries are now stale) and `check_consistency.py`. Do NOT rename them through `--post`: that
+> runs before the review, and `format_reviewer` finds the optional-section ceilings and the
+> Roles table by their ENGLISH heading text, so they would silently go unmeasured. Translations
+> used: Cơ cấu đội ngũ · Vai trò và trách nhiệm · Mốc bàn giao và nghiệm thu · Mô hình hỗ trợ ·
+> Khách hàng tham chiếu. **⚠ NEEDS CODE PROMOTION: `translate_vi.py` heading dictionary gains these
+> five; `format_reviewer._SECTION_WORD_CEILINGS` / `_TABLE_SECTIONS` gain their Vietnamese aliases.**
+
+> **Template tables split their rows; generated tables do not.** `build_docx._harden_table_rows`
+> covers the tables it builds, not the branch-model, environment and testing-scope tables the template
+> ships, and one of those split a row so that "smoke testing." sat alone at the top of a page. Setting
+> `cantSplit` on EVERY row is wrong too: the delivery-process table has 350-character rows with
+> bullets, and holding them whole left three half-empty pages in a row. Set `cantSplit` only on tables
+> whose longest row is short (300 characters worked), skip one-row caption tables, and on every real
+> table mark the first row `tblHeader` with `keepNext` on its paragraphs, so a header never ends a
+> page alone and repeats when a long table continues. **Done by `post_assembly.py` (step 2 of
+> `finalize.py`) since 2026-10-20.**
+
+> **The page header has room for about 42 characters per line.** It prints `for {PROJECT_TITLE} -
+> {CLIENT_NAME}`; a longer title wraps and leaves the last word of the client name alone on a third
+> line on every page. `post_assembly.py` drops a parenthetical gloss from the header copy (the cover
+> keeps it) and `format_reviewer` reports `page_header_wraps` if the line is still too long; then
+> shorten the project title used in the header.
 
 > **The second standing repair: `team_roles_not_table` cannot be fixed by fixing the content.**
 > `build_docx.py` and `format_reviewer.py` currently contradict each other here, so expect this
@@ -182,6 +245,50 @@ Run order matters and is not idempotent: `build_docx.py`, then any post-assembly
 > 10.20in (the probe is in `04_generate.md` gotcha 15); the fix is a smaller `width_inches` on that
 > one figure in `diagrams.json`, which is a content change, so it is one of the few cases where
 > re-running Phase 5a is correct.
+> **Getting the PDF for that probe:** `render_pages.py` keeps only the page PNGs, not the PDF. Call
+> its `docx_to_pdf(docx, out_dir)` from a run-local script, and **create `out_dir` first**: with a
+> missing folder the Word COM path fails with an opaque `(-2147352567, 'Exception occurred.')` and
+> the helper returns `None` (2026-10-20). Contact sheets of eight page PNGs at 600 px wide are
+> enough to read every page for layout in a few views; zoom into a page only where a sheet shows
+> something odd. **⚠ NEEDS CODE PROMOTION: `render_pages.docx_to_pdf` should `mkdir` its out_dir,
+> and `render_pages.py` should keep the PDF.**
+> Import it with `sys.dont_write_bytecode = True` so a head-less run does not write `__pycache__`
+> into the skill folder. When LibreOffice is absent `docx_to_pdf` falls back to Word COM, which is
+> good news: the page PNGs and the PDF are then Word's own layout, the one the client sees.
+>
+> **Find every word left alone on a line with the same PDF, because the eye misses most of them.**
+> A sheet-by-sheet read on one Vietnamese bid spotted three; this probe found twelve in the run's
+> own prose (the executive summary's last line "cập.", "cron.", "mobile.", "lịch.", "giờ." in the
+> summary, a roles-table cell ending "key)") while every review check passed:
+> ```python
+> # run-local, on the PDF from docx_to_pdf
+> for pno in range(doc.page_count):
+>     for b in doc[pno].get_text("dict")["blocks"]:
+>         if b.get("type") != 0: continue
+>         L = [l for l in ("".join(s["text"] for s in ln["spans"]).strip() for ln in b["lines"]) if l]
+>         if len(L) >= 2 and len(L[-1].split()) == 1 and 1.9 < b["bbox"][1] / 72 and b["bbox"][3] / 72 < 10.1:
+>             print(pno + 1, L[-2][-40:], "//", L[-1])
+> ```
+> Fix the hits in content the run wrote by rewording in `make_replacements.py` (shorten the
+> sentence by a few characters, or lengthen its tail), then rebuild: it is a content change. Hits in
+> the template's verbatim development-management pages and one-word table cells ("QC") are not
+> ours to change; list them only if the reader would notice. Expect a rebuild or two, since a
+> reworded line can push a different word onto its own line. **⚠ NEEDS CODE PROMOTION:
+> `format_reviewer.py --pages` (or `render_pages.py`) should report single-word last lines in
+> generated sections as a minor.**
+>
+> **Read the COVER and the case-study link in the FINAL file, not the reviewed one.** Two things
+> change after the review, so `format_review.json` cannot see either:
+> 1. The cover line `for {PROJECT_TITLE} - {CLIENT_NAME}` is checked by nothing. On one run it left
+>    one word alone on a line. See "`project_title` PRINTS ON EVERY PAGE" in `04_generate.md` for
+>    the header and cover repair through `finalize.py --post`.
+> 2. `refresh_toc.py`'s Word save rewrites the relationship-backed `w:hyperlink` from
+>    `post_assembly.py` into a `HYPERLINK` field. The reviewed copy has one `<w:hyperlink` and the
+>    delivered file has none. The link still works in Word, so it is not a defect. But a check
+>    that counts `w:hyperlink` or external relationships on the delivered file reports a missing
+>    link. Verify it by searching `word/document.xml` for `HYPERLINK "<case_study_url>"`.
+>    **⚠ NEEDS CODE PROMOTION: `refresh_toc.py`, either re-bind the relationship after the save
+>    or assert the field target.**
 >
 > **The fourth standing repair: a PROSE section can ship with no paragraph spacing at all, and no
 > check measures it.** `build_docx._expand_paragraph_with_value` expands a multi-paragraph value by

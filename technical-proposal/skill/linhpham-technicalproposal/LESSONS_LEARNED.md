@@ -44,6 +44,149 @@ phase prompts so it is enforced, and note the promotion here.
 
 <!-- Newest entry directly below this line. -->
 
+### MediLink Clinic Network — head-less VIETNAMESE proposal, E2E re-test on a fresh workspace — 2026-10-20
+
+- **Run:** web-app head-less, workspace `885bdee8ecd2` version 1, `language: vi`. 9 figures; 10 optional sections on, `team_engagement_model` / `delivery_governance` / `contractual_exceptions` null as selected, `phase_two_scope` null (Phase 2 is the last roadmap entry).
+  - Result: 50 pages, 5.3 MB. `finalize.py` READY on the first pass and on each of three content rebuilds: format review 0 issues / 30 checks, consistency 6/6, `diagram_check` 0 blockers, 0 figures over the footer, 0 placeholders, 0 em-dashes.
+- **Stack:** unchanged from the earlier MediLink runs (AWS ap-southeast-1 in the client's account, Java 25 modular monolith on ECS Fargate in four roles, Aurora + Valkey behind a virtual waiting room, outbox + SQS + one adapter per partner, offline clinic PWA, one React Native app, Bedrock and Chime SDK in-region).
+- **What worked, again:** four diagram agents grouped by renderer (cloud 3, cloud 2, sequence 2, graph 2) with one shared brief file (`specs/_diagram_brief.md`) instead of four long prompts, while the prose was written and gated in `specs/make_replacements.py`. The Vietnamese gate caught 12 labels over 4 syllables and an executive summary at 274/260 before any build.
+- **★ Twelve words alone on their last line, found by a PDF probe, not by eye.** The contact-sheet read saw three. A PyMuPDF block probe on Word's PDF listed every paragraph or cell whose last line is one token: executive summary, five stack-table cells, three role cells, the summary. Fixed by rewording, then two rebuilds (one rewording pushed another word down). **Promoted:** probe + procedure in `05b_format_review.md` (footer-probe block).
+- **★ `build_graph` legend is hard-coded English**, contrary to gotcha 18's claim; verified in the code (`<B>Legend</B>` literal). The graph agent rendered through a run wrapper. **Promoted:** gotcha 27 in `04_generate.md`.
+- **★ Some AWS stems print blank in the stack tables:** `aws/simple-storage-service-s3-object` as an empty circle, `aws/simple-queue-service-sqs-message` and `aws/sqs` as faint dashes. **Promoted:** logo rule (3) in `04_generate.md` with solid alternatives.
+- **Cross-reference pointed the wrong way:** a milestone said "theo quy trình UAT dưới đây" while UAT sits in the template chapter ABOVE the optional sections. **Promoted:** writing-style rule in `04_generate.md`.
+- **Cover:** the first build left "Network" alone and line 1 justified; `post_assembly.py` gained `fix_cover_title` (step [6]) during this run, from another session, and the rebuild applied it (centred, client bound). Nothing to promote; worth knowing that a concurrent run can change the skill under you, so re-read `LESSONS_LEARNED.md` before writing an entry.
+- **Footer probe:** no LibreOffice on this machine, so `render_pages` used Word COM; importing it with `sys.dont_write_bytecode` keeps `__pycache__` out of the skill. Added to the same 05b block.
+- **Content caveats for the bid owner:** references are an annex the bid owner must attach (two healthcare projects); case-study title and URL point at the case-study index; team shape has no headcount because no estimate exists (the document says so, counts are per squad); severity targets are our offer; the template's CI/CD text describes a GitOps controller reconciling "the cluster" on an ECS bid; the funnel's sizing example assumes a 3-minute session with 6 requests, stated as an assumption.
+- **⚠ NEEDS CODE PROMOTION:** `build_graph.py` legend language; `format_reviewer.py` / `render_pages.py` single-word last lines in generated sections; still open: `render_pages` mkdir + keep PDF, `diagram_check` reads `width_inches`, `diagram_check` `flat_boundaries` false positive on tinted subnets inside a `wraps[]` VPC (seen again here).
+
+### MediLink Clinic Network — head-less English proposal, E2E re-test on a fresh workspace — 2026-10-20
+
+- **Run:** web-app head-less, workspace `207a6be26bad` version 1, `language: en`. 9 figures; 10 optional sections on; `team_engagement_model`, `delivery_governance`, `contractual_exceptions` null as selected; `phase_two_scope` null (not offered by the web app), Phase 2 carried as the last roadmap entry.
+  - Result: 49 pages, 5.5 MB. `finalize.py` READY on the FIRST pass: format review 0 issues, 30 checks; consistency 6/6; `diagram_check` 0 blockers; 0 figures over the footer; 0 placeholders; 0 em-dashes.
+- **Stack:** unchanged from the two earlier MediLink runs (AWS ap-southeast-1 in the client's account, Java 25 modular monolith on ECS Fargate in four roles, Aurora + Valkey behind a virtual waiting room, outbox + SQS + one adapter per partner, offline clinic PWA, one React Native app, Bedrock and Chime SDK in-region).
+- **What the earlier promotions bought:** the first `finalize.py` pass was clean. The prose was gated in `specs/make_replacements.py` (reviewer word counting, 4-word labels, logo files exist, every selected key present and the off keys explicitly null) and the figures in `specs/make_diagrams_json.py` (7-17 bullets, 30 max, 25 average, intro 70, sync/async named, subheading not ending in a digit, 7.6in page budget). The header now shortens itself in `post_assembly.py`; the renderers' print-size typing (gotcha 18 promotion) left no figure under the legibility floor.
+- **★ Cover: the NBSP binding moved the hyphen to line 2.** `for <title> - <client>` wrapped as "…Platform" / "- MediLink Clinic Network". Fixed by gluing the hyphen to the title (`<title> - <client NBSP>`). Found only by the visual pass. **Promoted:** `04_generate.md`, `project_title` section (and the stale header NEEDS-CODE line rewritten as done).
+- **★ Length: every per-bullet rule met, document still about 9,600 words against 8,000.** Figures 3,554 (130 bullets, 394 per figure), stack tables 1,232, other prose 2,893, template verbatim about 1,900. Agents briefed with "7 to 17" wrote toward 17. Not cut in this run: the nine figures were confirmed at the gate and every bullet was inside its rules; reported in `_report.md`. **Promoted:** `04_generate.md`, length budget: derive a per-figure allowance from the figure count and put the bullet count in the agent brief.
+- **Diagram notes (four agents by renderer: cloud 2, sequence 2, graph 2, mixed 3):**
+  - `build_cloud` shared-band anchor labels sit on the band's top border on three figures. **Promoted:** gotcha 26.
+  - The reference architecture first rendered 7,285 px wide and hit `text_too_small_in_print`; shorter column headers fixed it (the code-side font scaling works as gotcha 18 says: it refuses, rather than shrinks).
+  - Agents chose `build_cloud` for the data-protection, AI and migration views (about 7pt node text) and `build_graph` LR for the context (one-node platform without a cluster, gotcha 16 respected).
+  - `diagram_check` reports `flat_boundaries` on a reference architecture whose tinted subnets are drawn inside a dashed VPC wrap; looks like a false positive, not verified in the code.
+- **Footer probe:** `render_pages.docx_to_pdf` fails through Word COM when its out_dir does not exist, and `render_pages.py` keeps no PDF. **Promoted:** `05b_format_review.md`.
+- **Content caveats for the bid owner:** references declared as an annex (two must be attached); case-study title and URL point at the case-study index; 34-position team is a staffing proposal with no estimate behind it (the document says so); severity targets are our offer; template CI/CD text still describes a GitOps controller reconciling "the cluster" on an ECS bid.
+- **⚠ NEEDS CODE PROMOTION:** `build_cloud._shared_anchor` label placement; `render_pages.docx_to_pdf` mkdir + keep the PDF; template cover subtitle centred and client name bound; still open from earlier entries: `diagram_check` reads `width_inches`, `refresh_toc` digit stripping, `check_consistency` rejection clauses.
+
+### MediLink Clinic Network — head-less VIETNAMESE proposal, first version — 2026-10-20
+
+- **Run:**
+  - Web-app head-less run, workspace `1925d0b643ba`, `language: vi`. This is the same client as the English run below, re-analysed in Vietnamese.
+  - 9 figures; 10 optional sections on, 3 null as selected, plus `phase_two_scope` null (Phase 2 is the last roadmap entry).
+  - Result: 51 pages; `finalize.py` READY; format review 0 issues with 30 checks passed, both before translation and on the delivered file. Consistency 6/6, `diagram_check` 0 blockers, 0 figures over the footer, 0 placeholders, 0 em-dashes.
+- **Stack:** unchanged from the English run (AWS ap-southeast-1 in the client's account, Java 25 modular monolith on ECS Fargate, Aurora + Valkey behind a virtual waiting room, outbox + SQS + one adapter per partner).
+- **★★ The consistency gate failed on the PLAN, and only at the end.** The cloud row's rationale read "Loại: … Azure hoặc GCP …". `check_consistency.py` counts a provider named inside a rejection, and `finalize.py` runs it as the LAST step, after the build, the review, the translation and the Word contents rebuild.
+  - Found early only because `check_consistency --plan` was run before the build, as 04 asks.
+  - Fix: reworded to "nhà cung cấp đám mây khác" with `spec/plan.json.bak_20261020_pre_gate` kept. No decision changed.
+  - 02_analyze's own table template asks for `Rejected: <alt>` in the Cloud row, so the skill contradicted itself.
+  - **Promoted:** note under the stack table in `02_analyze.md`, and a pointer in 04's "Before the long build".
+- **★★ A heading ending in a digit stops `finalize.py` at the contents rebuild.** `refresh_toc.py` strips trailing digits from every read-back entry (to drop the page number), so "… theo Nghị định 13" never matched its heading.
+  - Fixed by "Nghị định 13/2023/NĐ-CP".
+  - **Promoted:** gotcha 25 in `04_generate.md`.
+- **★★ `translate_vi.py` leaves five optional-section H5 headings in English:** Team Structure, Roles & Responsibilities, Milestones & Acceptance, Support Model and References.
+  - Found only by looking at the contents page.
+  - Repaired AFTER READY by `specs/_vi_headings_patch.py`, then `refresh_toc.py` and `check_consistency.py` again.
+  - Not done through `--post`, because the reviewer finds those sections' ceilings and the Roles table by their English names.
+  - **Promoted:** `05b_format_review.md`.
+- **★ Vietnamese counts syllables.** Every reviewer ceiling is `str.split()`, so the English ceilings bind about 40% harder in Vietnamese.
+  - All were met by counting in the generator (`specs/make_replacements.py`): executive summary 249 of 260; problem and solution pairs reworded from 63 to 55 or under; entry labels capped at 4 tokens.
+  - Diagram bullets were gated at 34 per bullet and an average of 28, as a syllable allowance.
+  - **Promoted:** the "Vietnamese proposals" paragraph in `04_generate.md`.
+- **Diagrams:** four agents, one per renderer group: cloud A (3), cloud B (2), sequence (2), graph (2).
+  - The agents' drafts were within the gate once they counted with Python. The first merge-gate pass ran before two cloud agents had finished their last trim, so wait for every notification before judging.
+  - Every `build_cloud` and `build_graph` legend was localised through run wrappers ("Chú thích / đồng bộ / bất đồng bộ"); the renderer legend is still hard-coded English (already flagged).
+  - The migration pipeline used `build_cloud` at 5 columns rather than `build_graph`: about 3.8pt on the page against about 3.5pt.
+  - Sequences used the gotcha-18 font wrapper: 5.76pt messages at 6 lanes.
+- **Content caveats:**
+  - Both references come from an annex the bid owner must attach.
+  - The case-study title and URL point to the case-study index.
+  - The 31-person team has no estimate behind it, and the document says so.
+  - The severity times are our offer.
+  - The template's verbatim CI/CD text still describes GitOps against "the cluster".
+  - An ALB was drawn in the reference architecture (needed for ECS blue/green) and Lambda for the waiting room; neither is named in the plan.
+- **⚠ NEEDS CODE PROMOTION:**
+  - `check_consistency.py`: ignore providers inside a rejection clause.
+  - `refresh_toc.py`: strip only a tab-separated page number.
+  - `translate_vi.py`: add the five headings, plus Vietnamese aliases in `format_reviewer._SECTION_WORD_CEILINGS` / `_TABLE_SECTIONS`.
+  - `post_assembly.py`: header length (still open from the run below).
+  - `build_cloud.py`: legend language and edge font (still open).
+
+### MediLink Clinic Network — head-less English proposal, first version — 2026-10-20
+
+- **Run:** web-app head-less run, first version of workspace `75c42fe0603c`, English.
+  - 9 figures; 10 optional sections on and 3 explicitly null. `phase_two_scope` was not in the web app's section list, so it was nulled and phase 2 was carried as a roadmap entry.
+  - Result: 51 pages, 4.9 MB, `finalize.py` READY, format review 0 issues and 30 checks passed, consistency 6/6, diagram_check 0 blockers (20 known-noise warnings), 0 figures over the footer, 0 placeholders, 0 em-dashes.
+- **Stack/architecture:** AWS ap-southeast-1 in the client's existing account; a hard constraint, because the client stated the preference, holds an enterprise agreement, and the Q&A allows Singapore hosting.
+  - Java 25 modular monolith on ECS Fargate in four runtime roles.
+  - Aurora PostgreSQL, ElastiCache for Valkey slot holds behind a virtual waiting room.
+  - SQS outbox with one adapter per partner.
+  - Offline-first React PWA for the clinic, one React Native app.
+  - Bedrock and Chime SDK kept in-region, so the Decree 13 transfer assessment covers one place.
+- **★★ The project title printed on every page was the plan's description.** `plan.project` is a sentence with a colon.
+  - Used as `project_title`, it made an 87-character header line, failing `page_header_wraps`. The reviewer passed everything else.
+  - On the cover it left "Network" alone on a line. Shortening the title still left it alone, because Word fits "MediLink Clinic" on line 1.
+  - Final fix: short title. A `finalize.py --post` repair (`specs/_header_patch.py`) that sets the header to `for <title>`, binds the client name with non-breaking spaces on the cover, and centres the cover line (justified, line 1 spread across the page).
+  - Found only by the visual pass. **Promoted:** "`project_title` PRINTS ON EVERY PAGE" in `04_generate.md`, and a cover check in `05b`.
+- **★ Word's save turns the case-study `w:hyperlink` into a HYPERLINK field.** The reviewed copy has one `<w:hyperlink`, the delivered file has 0 and a working field. Not a defect, but a count-based check on the delivered file would fail. **Promoted to `05b`.**
+- **Diagram lessons (three parallel agents, all promoted as gotchas 20 to 24 in `04_generate.md`):**
+  - `build_cloud` fan-out into a tall column takes a vertical route through labels.
+  - Edge order sets the stagger.
+  - Equal tech-line counts keep rows level.
+  - The legend collides with a tall right-hand column when there is no wrap.
+  - `build_cloud` writes no `.svg`.
+  - `build_graph` edge labels touch their own polyline (leading spaces fix it).
+  - Sequence self-call labels cross the next lifeline.
+  - `diagram_check` ignores `width_inches`.
+  - Agents also confirmed gotcha 18's font wrapper (5.76pt at six lanes) and that self-reported bullet counts were wrong again: one agent's first drafts averaged 25.8 to 27.3 words against 25. The merge gate (`specs/make_diagrams_json.py`) is still what holds the line.
+- **Good decisions worth repeating:**
+  - Diagrams went to 3 agents grouped by renderer (cloud, sequence, graph) while the prose was written and gated (`specs/make_replacements.py`), so assembly started as soon as the last figure landed.
+  - The system context grouped the ten partners by whether a user waits on them (synchronous) or not (through the outbox), rather than by domain. The sync/async rule then reads straight off the figure.
+- **Content caveats for the bid owner:**
+  - References are declared as an annex: two healthcare references must be attached.
+  - The case-study title and URL point at the case-study index.
+  - Team headcount (30 at peak) is a staffing proposal with no estimate behind it, and the document says so.
+  - Severity response times are our offer, not a client figure.
+  - The template's verbatim CI/CD text mentions a GitOps controller reconciling "the cluster", which does not fit ECS Fargate.
+- **⚠ NEEDS CODE PROMOTION:**
+  - `post_assembly.py`: drop the client name from the header line when it exceeds 42 characters.
+  - Template: centre the cover subtitle.
+  - `refresh_toc.py`: re-bind or assert the case-study link after the Word save.
+  - `diagram_check.py`: read `width_inches`.
+  - `build_cloud.py`: an edge-label font option. Edge text is also centred on the font's nominal size, so lines show through the lower part of the label; measure with `getbbox`.
+  - The template's unnumbered H5 headings (Mobile App Strategy, Team Structure and their siblings) appear unnumbered in the rebuilt contents among numbered siblings.
+
+### Concert ticketing platform (VN) — follow-up: the selling point had no section of its own — 2026-10-19
+
+- **What happened:** the bid's deciding requirement (100,000 buyers in the queue at sale open) was covered by one Problems & Solutions pair, one summary sentence and the steps of a sequence diagram. The reviewer had no way to see that it was thin, because every sentence was correct.
+- **Fix:** a dedicated section after the reference architecture: a five-column funnel figure (buyers, edge queue, GCP entry, Cloud Run pre-warmed, data) with the design number on each edge, and bullets carrying a sizing model computed for a stated example (20,000-seat concert, 5-minute purchase: 600 admitted per minute, about 3,000 in the flow, 350 req/s average and 1,000 at peak with a 3x margin, under 50 database writes per second), the contention mechanism, saturation behaviour, four load-test scenarios and scoped pass criteria. The intro states that 100,000 is people in a queue and not requests on the backend, and that the admission rate is 70% of the capacity measured in load test.
+- **Format issue:** `build_cloud` edge labels print at about 4.5pt, and here they carried the key numbers; a run-level wrapper raised them to 12*S bold.
+- **Promoted:** "THE HEADLINE NON-FUNCTIONAL REQUIREMENT GETS ITS OWN SECTION" in `04_generate.md`. **NEEDS CODE PROMOTION:** an edge-label font option in `build_cloud`.
+
+### Concert ticketing platform (VN) — high-level proposal in Vietnamese, no RFP — 2026-10-19
+
+- **Stack/architecture proposed:** GCP, Go microservices on Cloud Run behind Google Cloud API Gateway, Cloud Load Balancing + Cloud Armor + Cloud CDN at the edge, a managed virtual waiting room (Cloudflare Waiting Room or Queue-it), Cloud SQL for PostgreSQL per service, Memorystore for Redis for the atomic seat hold (Lua, 10-minute TTL), Pub/Sub with dead-letter topics, BigQuery + Looker Studio, Next.js for web and portal, one Flutter codebase for the buyer app and the check-in app. Go rather than Node.js because the load is 100,000 concurrent buyers in a queue and the client asked for an objective choice; the client also answered "microservices" and "Golang" in the Q&A, and the proposal used those answers instead of arguing them again.
+- **★★ THE INPUT WAS A Q&A WITH ANSWERS, NOT AN RFP.** Thirteen questions with the client's answers in a column (self-built seat map, ticket limit per account, login through the client's existing account system, offline check-in, waiting room "may be considered"). Treat every answer as a decision already taken: the seat map became its own figure, the account login became an assumption plus a risk. The one answer that was a maybe (waiting room) stays a maybe everywhere.
+- **★★ A CROSS-DOCUMENT CONTRADICTION THAT NO GATE COULD SEE.** The WBS and SOW carry the self-built waiting room as a highlighted OPTION of Phase 1, quoted separately and not added to the total; the proposal put it in "Phase 2 Scope" and in one stack row. `check_consistency` compares stack, cloud and figures, not scope placement. Found by reading page 17 against the SOW. Rule for any bid with an option: grep the proposal for every optional item in the SOW and make it say the same phase and the same commercial treatment.
+- **★★ I RAN A COPIED SCRIPT AGAINST ANOTHER PROJECT'S DELIVERED FILE.** The TOC-refresh script was copied from a previous bid with `sed` replacing its hardcoded path; the backslash escaping silently failed, and the script rebuilt the other bid's delivered proposal. Its own pre-run backup restored the file byte for byte and that project's gates passed afterwards, so no harm landed, but only because the script backed up first. **A per-project script derives its target from `__file__` and asserts the project folder in the path; never retarget one with a text substitution.**
+- **Format/layout issues hit & fix (all measured on the rendered pages):**
+  - empty `2.1.1 System Context` heading: the context diagram's subheading was in Vietnamese, so `SUBHEADING_ANCHOR` did not match. Fixed by keeping the subheading `System Context`. Promoted as item 19 of the renderer gotchas in `04_generate.md`.
+  - stale template contents page; cover title, "Content" and the two party names listed in the rebuilt contents; contents two lines over a page; English header, cover and role labels; "Project Coordinator" typed twice in the template; header subtitle wrapping onto a third line. All fixed by run scripts (`_translate_vi.py`, `_refresh_toc.py`) and promoted as the "delivered in another language" block in `05b_format_review.md`.
+  - a template table row split leaving "smoke testing." alone on a page; first fix (cantSplit everywhere) created three half-empty pages, second fix limited it to short-row tables plus header rows kept with the next row. Promoted to `05b`.
+  - `format_reviewer` reported a UAT blocker on the translated file while the four terms were present: the check reads English phrases. The review now runs before translation. Promoted to `05b`.
+  - Word's save dropped 35 orphaned template pictures and the media-part count read that as 35 re-encoded images. Verify by displayed pictures. Promoted to `05b`.
+- **Diagram-quality issues & fix:** both sequence diagrams printed their message labels at about 3pt (7 lanes = 4,700 px canvas at 7.2in) and passed `diagram_check`. Re-rendered through a wrapper that scales the renderer's fonts 1.8× and lifts the labels off their arrows. Promoted as item 18 in `04_generate.md` with the formula. `build_cloud`'s legend is still hard-coded English ("Legend / sync / async") on a Vietnamese figure.
+- **Content gaps:** the chapter titled "Assumptions, dependencies and risks" had no risks, because `risk_register` was null while the group heading stayed. Added six risks drawn from the dependencies the client owns. Promoted to `04_generate.md` as "assumptions and risks travel together".
+- **Do better next time (reusable):** (a) put the whole post-assembly order in one `specs/_rebuild.py` from the first build, because this run rebuilt six times and every manual sequence is a chance to skip a step; (b) render and look at every page before translating, then again after the TOC rebuild; (c) compute the printed font size of every figure, sequences included; (d) compare each optional or deferred item between proposal, WBS and SOW.
+- **NEEDS CODE PROMOTION (not done this run, the repo is shared and dirty):** `build_sequence.render` font scaling with width; `build_cloud` legend language; template cover styles and duplicate "Project Coordinator"; a TOC-refresh script under `scripts/`; `_harden_table_rows` for template tables; `OPTIONAL_SECTION_GROUPS` retitling or failing when one key of a group is dropped; a language-aware UAT check; the case-study sentence and Summary spacing repairs, still applied per run.
+
 ### A commitment with no scope is a promise over whatever the reader decides it covers — 2026-08-27
 
 - **What this was:** a pass over the factual technical ASSERTIONS in a delivered bid, as opposed to its structure. The distinction that made it productive, and worth reusing: anything the document already declares as "to be measured later" is protected; anything asserted as fact is the exposure. Three findings generalised into the skill; the rest were project-specific and stayed in the project's own lessons.
@@ -348,3 +491,63 @@ contradiction on an ordinary word gets switched off and then catches nothing.
 mentions. A row can legitimately name an internal choice the prose describes in other words,
 so failing on it would fire on sound proposals. The direction that costs a bid is the
 contradiction, not the omission.
+
+### 2026-10-20 — Language is a gate decision, and the finishing order is one script
+
+A Vietnamese bid needed six project-specific scripts to finish (template repairs, review,
+translation, contents rebuild, consistency, a rebuild runner), each written by hand in the run's
+own folder, and the right order existed only in that folder. The skill prompts described the
+lessons but nothing ran them, so the next run would rewrite the same scripts.
+
+* **The proposal language is now decided at the Phase 3 gate** (`plan.json` `"language": "en" |
+  "vi"`) instead of inferred from the RFP. It decides what the content agents write and which
+  finishing path runs. One language per document; technical keywords stay English.
+* **`scripts/finalize.py` is the one command after Phase 4**: build, `post_assembly.py` (case
+  study sentence with a real hyperlink, prose spacing, template table rows, page-header length),
+  image spacing, strict review that must be clean, then for `vi` `translate_vi.py`, then
+  `refresh_toc.py`, `check_consistency.py`, and `check_crossdoc.py` when a WBS ships too.
+* **The contents page needs rebuilding for English proposals too.** The stale cache comes from
+  the template, not from the translation; it was only noticed on the translated run.
+* **Review checks that match English phrases must know the other language.** The UAT check and
+  the narrative-length headings now accept the Vietnamese wording the translation produces.
+* **Proposal vs WBS**: a quoted total close to but different from the WBS total, a different
+  cloud, and every paragraph mentioning an Out of Scope item (flagged under an in-scope heading)
+  are now checked. Matching single Vietnamese words flagged everything (a word is a syllable);
+  two-word phrases match what is meant. The WBS total is evaluated from its own TOTAL formula,
+  because summing every task counted a priced option kept outside the total.
+* Tested on copies of a delivered Vietnamese proposal: both paths reach READY, 0 review issues,
+  contents 0 -> 40 entries, 49/49 displayed pictures kept their size.
+
+### 2026-10-20 — Type sized for the printed page, one-page contents, Vietnamese template pictures
+
+Three defects a page-by-page read found after every gate had passed, all now handled in code:
+
+* **Figure type printed at 3-5pt.** The renderers sized type in canvas pixels while the canvas
+  grows with every column or lane, and the figure is embedded about 6.5in wide. All three
+  renderers now work out the printed size after the first layout and lay out again with larger
+  type (cloud and graph: node names 7pt, `[tech]` and edge labels 5pt; sequence: message labels
+  6pt), widening cells and gutters by sqrt(scale) so the extra type wraps instead of overflowing.
+  What still cannot reach the floors is `text_too_small_in_print`, a diagram_check blocker. Two
+  findings came out of testing it on real specs: the small/large type ratio has to match the two
+  floors (9/14 left the small labels behind every time), and each step must overshoot
+  (need ** 1.5) or wider labels widen the image and the loop crawls. Edge labels may now carry
+  `\n`, the `[tech]` line wraps, and the cloud legend follows the figure's language.
+* **Contents on two pages.** With the optional sections on, 50 entries overflow. refresh_toc.py
+  measures the pages the contents occupy and steps the TOC type down to 8.5pt until it fits.
+  Its own stale-entry check had been reading `doc.paragraphs`, which never includes the
+  contents control (w:sdt), so it read 0 entries and passed; and a page number follows a
+  `<w:tab/>` element, not a tab character.
+* **English inside the template's process pictures.** `make_vi_template_images.py` keeps each
+  picture as drawn and replaces only the text (ink found inside a region, painted out with the
+  region's own background, Vietnamese written in place; slanted labels cleared along their own
+  band so the arrow beside them survives). `translate_vi.py` swaps a picture by the hash of its
+  bytes. Terms the Vietnamese text also keeps in English stay English in the pictures.
+* Also from the same runs: the cover's duplicated "Project Coordinator" is removed for both
+  languages, the page header drops " - <client>" when a parenthetical is not enough, and five
+  optional-section headings were missing from the translation table.
+* **Second end-to-end round through the web app** (same synthetic bid, EN and VI) confirmed the
+  agents now use the renderers directly; the only run-made scripts left were a cover patch and
+  a graph-legend wrapper, both promoted: `post_assembly.py` binds the cover line
+  (`<title>&nbsp;- <client with non-breaking spaces>`, centred) so the next line never starts
+  with the hyphen, and `build_graph` translates its legend like `build_cloud`. The picture
+  captions of the template ("Figure N: Agile Methodology") are now translated by name too.

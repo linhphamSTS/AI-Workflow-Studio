@@ -10,12 +10,19 @@ workbook rather than a differently-worded one.
       "project":       "Acme Platform",          // used in the filename and the cover
       "currency_note": "man-hours",
       "mode":          "author" | "fill",
-      "columns":       ["ui", "be", "fe", "mob", "ai"],   // in sheet order, F onward
-      "column_labels": ["UI/UX Design", "Back-end Development",
+      "columns":       ["ui", "devops", "be", "fe", "mob", "ai"],   // in sheet order, F onward
+      "lang":          "en" | "vi",   // optional; detected from the task text otherwise.
+                                    // Every label the builder writes follows it
+      "column_labels": ["UI/UX Design", "Devops", "Back-end Development",   // fill mode only
                         "Front-end Development", "Mobile", "AI"],
 
       "zero_columns":  ["ui"],        // priced at zero on purpose, rows kept
-      "zero_modules":  ["6"],         // same, by leading module number
+      "zero_modules":  ["7"],         // same, by module ("7", the NFR module) or section
+                                      // prefix ("2.2"); its all-zero rows are allowed
+      "uplifts_in_base": "...",       // optional: the uplifts (integration buffer,
+                                      // no-sandbox, bundled N) were written into the base
+                                      // hours; say which. Satisfies the two-sided check
+                                      // when the factors table is empty on purpose
       "zero_note":     "why they are zero, shown on the cover",
       "competitive":   1.0,           // 1.0 = no discount taken in the hours
       "bid_situation": "many vendors bidding",   // from rules section 1, decides the
@@ -42,9 +49,10 @@ workbook rather than a differently-worded one.
         {"kind": "L1", "id": 1,       "title": "INFRASTRUCTURE"},
         {"kind": "L2", "id": "1.1",   "title": "Cloud foundation"},
         {"kind": "T",  "id": "1.1.1",
-         "group":   "Landing zone",        // column B; null continues the merge above
+         "group":   "Landing zone",        // column B; set it on EVERY leaf (house BA style,
+                                           // no vertical merge); null continues a merge
          "feature": "Cloud landing zone",
-         "desc":    "- bullet\n- bullet",
+         "desc":    "Chức năng: ...\n1. Mục đích: ...",   // house BA style, see prompts/04
          "assum":   "Assumption:\n- ...",
          "ui": 0, "be": 8, "fe": 0, "mob": 0, "ai": 0,
          "refs":    ["CC-01", "SEC-03"],   // requirement ids this task satisfies
@@ -65,12 +73,15 @@ workbook rather than a differently-worded one.
       "requirements": [               // every id in the source documents
         {"id": "CC-01", "text": "...", "priority": "M"}
       ],
-      "out_of_scope": [{"item": "...", "reason": "..."}]
+      "out_of_scope": [{"item": "...", "reason": "...",
+                        "module": "3. Customer app"}]   // module optional; adds a column
     }
 
 Anything optional may be omitted. Anything present is validated, because a spec that is
 silently wrong produces a workbook that is confidently wrong.
 """
+
+import re
 
 KINDS = ('L1', 'L2', 'T')
 RISK_LEVELS = ('High', 'Medium')
@@ -118,10 +129,10 @@ def validate(spec):
         if rid in seen_ids:
             e.append(f'{where}: duplicate id')
         seen_ids.add(rid)
-        try:
+        if not re.fullmatch(r'\d+(\.\d+)*', rid):
+            e.append(f'{where}: id must be dotted integers with no spaces')
+        else:
             order.append([int(p) for p in rid.split('.')])
-        except ValueError:
-            e.append(f'{where}: id must be dotted integers')
 
         if kind in ('L1', 'L2'):
             if not r.get('title'):
@@ -148,9 +159,9 @@ def validate(spec):
             if float(v) != int(v):
                 e.append(f'{where}: {c}={v} is not a whole hour')
             vals.append(v)
-        if vals and not any(vals):
+        if vals and not any(vals) and not is_zeroed(r, spec):
             e.append(f'{where}: every column is zero. Either estimate it, or list it in '
-                     'out_of_scope, or zero it deliberately via zero_columns/zero_modules')
+                     'out_of_scope, or zero it deliberately via zero_modules')
         risk = r.get('risk')
         if risk is not None:
             if risk.get('level') not in RISK_LEVELS:
@@ -239,3 +250,11 @@ def leaf_rows(spec):
 
 def module_of(row):
     return str(row.get('id', '')).split('.')[0]
+
+
+def is_zeroed(row, spec):
+    """True when the row sits in a module or section declared zero on purpose
+    (`zero_modules` takes a module id such as "7" or a section prefix such as "2.2")."""
+    rid = str(row.get('id', ''))
+    return any(rid == str(m) or rid.startswith(str(m) + '.')
+               for m in (spec.get('zero_modules') or []))

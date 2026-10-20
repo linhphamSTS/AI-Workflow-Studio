@@ -73,8 +73,10 @@ svg{display:block}
 .side-list-head .count{background:var(--surface-3);color:var(--muted);border-radius:20px;
   padding:1px 8px;font-size:10.5px;letter-spacing:0}
 .ws-list{flex:1;overflow:auto;display:flex;flex-direction:column;gap:7px;margin:-6px -4px 0;padding:6px 4px}
+/* flex-shrink:0: in a scrolling flex column the cards were squeezed instead of scrolled once
+   the list outgrew the sidebar, clipping the meta row of every card. */
 .ws-item{position:relative;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r);
-  cursor:pointer;background:var(--surface);transition:all .15s ease;overflow:hidden}
+  cursor:pointer;background:var(--surface);transition:all .15s ease;overflow:hidden;flex-shrink:0}
 .ws-item:hover{border-color:var(--line-2);background:var(--surface-2);transform:translateY(-1px);box-shadow:var(--sh-sm)}
 .ws-item.active{border-color:transparent;background:var(--grad-soft);box-shadow:0 0 0 1.5px var(--brand-1) inset}
 .ws-item.active::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--grad)}

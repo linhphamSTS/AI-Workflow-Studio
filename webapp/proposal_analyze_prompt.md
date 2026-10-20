@@ -45,6 +45,9 @@ Write `{{WORKSPACE_DIR}}/spec/plan.json` (create `spec/` if needed):
 ```json
 {
   "project": "the project / client name",
+  "client": "the client name exactly as the proposal should write it",
+  "language": "en | vi — the proposal language you recommend (Vietnamese RFP or client -> vi)",
+  "language_reason": "one line: why this language",
   "summary": "3-6 sentence analysis: what the system is, the key requirements, and what you propose.",
   "tech_stack": [
     {"layer": "Backend",      "choice": "e.g. .NET 10 (current LTS)", "rationale": "why, grounded in the docs"},
@@ -81,6 +84,9 @@ Write `{{WORKSPACE_DIR}}/spec/plan.json` (create `spec/` if needed):
 ```
 
 Rules:
+- `language` is exactly `"en"` or `"vi"` (02_analyze.md, Style rules). It is a recommendation the
+  user confirms at the gate; write the plan's own prose (summary, rationale, architecture,
+  diagram titles) in that language too, so the user reviews what the document will say.
 - Ground EVERYTHING in the ingested docs. Do not invent client/team/timeline facts.
 - `diagrams` = the set the proposal will contain (the generate step will draw them).
 - If mobile is not in scope, say so in `tech_stack` and omit the mobile section from `sections`.

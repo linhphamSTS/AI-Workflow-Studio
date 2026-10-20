@@ -55,6 +55,9 @@ COL_W = 640
 MSG_GAP = 165
 LIFELINE_PAD = 70
 FRAG_PAD = 22
+EMBED_IN = 6.5      # build_docx embeds a figure about this wide; spec key "embed_inches"
+MSG_MIN_PT = 6.0    # a message label must print at least this large on the page
+FS_MAX = 2.6
 
 INK = "#1a1a1a"
 LIFELINE = "#90A4AE"
@@ -93,6 +96,20 @@ def _centered(draw, cx, cy, text, font, fill=INK):
     bb = draw.textbbox((0, 0), text, font=font)
     w = bb[2] - bb[0]
     draw.text((cx - w / 2 - bb[0], cy - (bb[1] + bb[3]) / 2), text, font=font, fill=fill)
+
+
+def _wrap_text(draw, text, font, maxw):
+    words, lines, cur = str(text).split(), [], ""
+    for w in words:
+        t = (cur + " " + w).strip()
+        if _txt_wh(draw, t, font)[0] <= maxw or not cur:
+            cur = t
+        else:
+            lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    return lines or [""]
 
 
 def _head_colors(role: str):
@@ -138,15 +155,30 @@ def render(spec: dict, out: Path) -> Path:
     n = len(parts)
     n_rows = len(msgs)
     width = MARGIN * 2 + COL_W * n
-    height = TITLE_H + HEAD_H + MSG_GAP * (n_rows + 1) + MARGIN
+    # PRINT SIZE. The canvas grows 640 px per participant while the type was fixed in pixels,
+    # so seven lanes printed the message labels at about 3pt against 10-11pt body text and every
+    # check passed. Scale the type so a message label prints at MSG_MIN_PT or more at the embed
+    # width (spec "embed_inches", default 6.5), and grow the row pitch and header band with it.
+    embed = float(spec.get("embed_inches", EMBED_IN))
+    fs = max(1.0, min(FS_MAX, MSG_MIN_PT * width / (72.0 * embed * 28)))
+    fs = max(fs, float(spec.get("font_scale", 1.0)))
+    f_title = load_font(round(54 * min(fs, 1.3)), bold=True)
+    f_head = load_font(round(34 * min(fs, 1.8)), bold=True)
+    f_msg = load_font(round(28 * fs))
+    f_frag = load_font(round(26 * min(fs, 1.8)), bold=True)
+    msg_gap = round(MSG_GAP + (f_msg.size - 28) * 0.5)   # the label is lifted, so the pitch barely grows
+    title_h = round(TITLE_H * min(fs, 1.3))
+    head_lines = {}
+    probe = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+    for p in parts:   # a header wider than its lane wraps onto a second line instead of overflowing
+        label = p.get("label", p["id"])
+        head_lines[p["id"]] = _wrap_text(probe, label, f_head, COL_W - 90)
+    head_h = max(HEAD_H, max(len(v) for v in head_lines.values()) * (f_head.size + 12) + 50)
+    height = title_h + head_h + msg_gap * (n_rows + 1) + MARGIN
 
     img = Image.new("RGB", (width, height), "white")
     d = ImageDraw.Draw(img)
 
-    f_title = load_font(54, bold=True)
-    f_head = load_font(34, bold=True)
-    f_msg = load_font(28)
-    f_frag = load_font(26, bold=True)
 
     # title
     if spec.get("title"):
@@ -154,8 +186,8 @@ def render(spec: dict, out: Path) -> Path:
 
     # participant x-centres
     cx = {p["id"]: MARGIN + COL_W // 2 + i * COL_W for i, p in enumerate(parts)}
-    head_top = TITLE_H
-    head_bot = TITLE_H + HEAD_H
+    head_top = title_h
+    head_bot = title_h + head_h
     life_bot = height - MARGIN
 
     # lifelines
@@ -167,15 +199,18 @@ def render(spec: dict, out: Path) -> Path:
     for p in parts:
         x = cx[p["id"]]
         fill, stroke = _head_colors(p.get("role"))
-        label = p.get("label", p["id"])
-        bw = min(COL_W - 60, max(220, _txt_wh(d, label, f_head)[0] + 70))
+        lines = head_lines[p["id"]]
+        bw = min(COL_W - 60, max(220, max(_txt_wh(d, t, f_head)[0] for t in lines) + 70))
         d.rounded_rectangle([x - bw / 2, head_top, x + bw / 2, head_bot],
                             radius=16, fill=fill, outline=stroke, width=4)
-        _centered(d, x, (head_top + head_bot) / 2, label, f_head)
+        lh = f_head.size + 12
+        y0 = (head_top + head_bot) / 2 - lh * (len(lines) - 1) / 2
+        for k, t in enumerate(lines):
+            _centered(d, x, y0 + k * lh, t, f_head)
 
     # fragment boxes (drawn behind messages): map 1-based msg index -> y
     def msg_y(i):  # i is 0-based row
-        return head_bot + MSG_GAP * (i + 1)
+        return head_bot + msg_gap * (i + 1)
 
     for fr in frags:
         try:
@@ -183,8 +218,8 @@ def render(spec: dict, out: Path) -> Path:
             i1 = int(fr.get("to", n_rows)) - 1
         except (TypeError, ValueError):
             continue
-        y0 = msg_y(i0) - MSG_GAP * 0.55
-        y1 = msg_y(i1) + MSG_GAP * 0.4
+        y0 = msg_y(i0) - msg_gap * 0.55
+        y1 = msg_y(i1) + msg_gap * 0.4
         d.rectangle([MARGIN * 0.6, y0, width - MARGIN * 0.6, y1],
                     outline=FRAG_STROKE, width=3)
         tag = fr.get("type", "alt").upper()
@@ -213,7 +248,7 @@ def render(spec: dict, out: Path) -> Path:
             d.line([(x0 + w, bot), (x0, bot)], fill=ARROW, width=3)
             _arrowhead(d, x0, bot, -1, ARROW, filled=True)
             if label:
-                d.text((x0 + w + 18, y - 18), label, font=f_msg, fill=INK)
+                d.text((x0 + w + 18, y - f_msg.size * 0.65), label, font=f_msg, fill=INK)
             continue
 
         direction = 1 if x1 > x0 else -1
@@ -224,9 +259,13 @@ def render(spec: dict, out: Path) -> Path:
             d.line([(x0, y), (x1, y)], fill=ARROW, width=3)
         _arrowhead(d, x1, y, direction, ARROW, filled=(kind in ("sync", "create")))
         if label:
-            tw, _ = _txt_wh(d, label, f_msg)
+            tw, th = _txt_wh(d, label, f_msg)
             lx = (x0 + x1) / 2
-            _centered(d, lx, y - 26, label, f_msg)
+            # Lift the label clear of its arrow as the type grows, and paint a white plate
+            # behind it so a lifeline it crosses never runs through the text.
+            ly = y - 26 - (f_msg.size - 28) * 0.6
+            d.rectangle([lx - tw / 2 - 8, ly - th / 2 - 6, lx + tw / 2 + 8, ly + th / 2 + 6], fill="white")
+            _centered(d, lx, ly, label, f_msg)
 
     out.parent.mkdir(parents=True, exist_ok=True)
     # Sharpness for Word: build_docx.py embeds every figure at width = 6.5in, so a narrow

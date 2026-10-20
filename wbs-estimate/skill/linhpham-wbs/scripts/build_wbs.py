@@ -19,6 +19,7 @@ a Cover that rolls up and an Out of Scope sheet that draws the boundary.
 import argparse
 import json
 import os
+import re
 import sys
 
 from openpyxl import Workbook
@@ -29,7 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from xlsx_style import (  # noqa: E402
     A_CENTER, A_LEFT_CENTER, A_LEFT_TOP, B_LTB, B_NONE, B_RTB, B_TB, C_EFFORT, C_HEADER,
     C_HEADER_TOT, C_L1, C_L2, C_LEAF, C_OOS_HDR, C_TOTAL, FONT, autofit_row_heights,
-    banner, notes, style,
+    banner, bold_labels, notes, style,
 )
 from openpyxl.styles import Font  # noqa: E402
 import wbs_schema  # noqa: E402
@@ -38,7 +39,7 @@ WIDTHS = {'A': 10.43, 'B': 33.29, 'C': 63.0, 'D': 87.0, 'E': 60.14,
           'F': 12.57, 'G': 15.71, 'H': 15.71, 'I': 10.5, 'J': 9.0, 'K': 12.14}
 COVER_WIDTHS = {'A': 48, 'B': 13, 'C': 15, 'D': 15, 'E': 11, 'F': 9, 'G': 13}
 OOS_WIDTHS = {'A': 6.57, 'B': 60.0, 'C': 70.0}
-DEFAULT_LABELS = {'ui': 'UI/UX Design', 'be': 'Back-end Development',
+DEFAULT_LABELS = {'ui': 'UI/UX Design', 'devops': 'Devops', 'be': 'Back-end Development',
                   'fe': 'Front-end Development', 'mob': 'Mobile', 'ai': 'AI'}
 
 
@@ -98,7 +99,8 @@ def apply_factors(spec):
             r[c] = 0
         log.append(('zero', 'column ' + c, '', out, 0, 'absorbed', '%d row(s)' % n))
     for m in spec.get('zero_modules', []):
-        rows_ = [r for r in wbs_schema.leaf_rows(spec) if wbs_schema.module_of(r) == str(m)]
+        rows_ = [r for r in wbs_schema.leaf_rows(spec)
+                 if str(r['id']) == str(m) or str(r['id']).startswith(str(m) + '.')]
         out = sum(r.get(c) or 0 for r in rows_ for c in cols)
         for r in rows_:
             for c in cols:
@@ -121,6 +123,9 @@ def apply_factors(spec):
     # Write it back, or the factor log and the competitive position report different
     # numbers in the same run and neither is obviously the wrong one.
     spec['competitive'] = comp
+    pre_comp = {str(r['id']): sum(r.get(c) or 0 for c in cols if c not in
+                                  (spec.get('zero_columns') or []))
+                for r in wbs_schema.leaf_rows(spec)}
     if comp and comp != 1.0:
         before = sum(r.get(c) or 0 for r in wbs_schema.leaf_rows(spec) for c in cols)
         for r in wbs_schema.leaf_rows(spec):
@@ -140,7 +145,7 @@ def apply_factors(spec):
                     'intended -%.0f%%, realised -%.1f%%  (%s)'
                     % ((1 - comp) * 100, realised * 100,
                        spec.get('bid_situation') or 'situation not stated')))
-    apply_floors(spec, log)
+    apply_floors(spec, log, pre_comp)
     return log
 
 
@@ -177,33 +182,40 @@ FLOOR_RULES = (
 
 
 def floor_for(row):
-    text = ' '.join(str(row.get(k) or '') for k in ('feature', 'group', 'desc')).lower()
+    # Feature name only, whole words from the start: a description reworded, or a group
+    # called "Onboarding & Authentication", must not move the hours of the task.
+    text = str(row.get('feature') or '').lower()
     for words, floor, why in FLOOR_RULES:
         if not words:
             return floor, why
-        if any(w in text for w in words):
+        if any(re.search(r'\b' + re.escape(w), text) for w in words):
             return floor, why
     return 3, 'under three hours leaves no room to test'
 
 
-def apply_floors(spec, log):
+def apply_floors(spec, log, before):
     """Raise any leaf the competitive factor pushed under its floor.
 
     The competitive factor is applied to win the work; the floors are applied so winning it
     is still worth having. They are not in tension: one moves the price, the other refuses to
     move the part of the estimate that pays for testing the work.
+
+    Only a task the factor actually reduced is raised, and never above what it was before
+    the factor. A small task the estimator wrote as small stays as written: the floor is a
+    guard on the discount, not a second estimate.
     """
     cols = spec['columns']
     zero = set(spec.get('zero_columns') or [])
-    zmods = {str(m) for m in (spec.get('zero_modules') or [])}
     for row in wbs_schema.leaf_rows(spec):
-        if wbs_schema.module_of(row) in zmods:
+        if wbs_schema.is_zeroed(row, spec):
             continue
         live = [c for c in cols if c not in zero and (row.get(c) or 0)]
         total = sum(row.get(c) or 0 for c in live)
-        if not total:
+        pre = before.get(str(row['id']), total)
+        if not total or total >= pre:
             continue
         floor, why = floor_for(row)
+        floor = min(floor, pre)
         if total >= floor:
             continue
         biggest = max(live, key=lambda c: row.get(c) or 0)
@@ -336,26 +348,31 @@ def print_competitive_position(spec, total):
 # ------------------------------------------------------------------ WBS sheet
 def build_sheet(ws, spec, modules):
     cols = spec['columns']
-    labels = spec.get('column_labels') or [DEFAULT_LABELS.get(c, c.upper()) for c in cols]
+    T = TEXT[lang_of(spec)]
+    labels = effort_labels(spec, T)
     n_eff = len(cols)
     first_eff = 6
     total_col = first_eff + n_eff              # K when there are five columns
     last_col = total_col
 
     ws.sheet_view.showGridLines = False
-    for letter, width in WIDTHS.items():
-        if get_column_letter(last_col) >= letter or letter in 'ABCDE':
-            ws.column_dimensions[letter].width = width
+    ws.freeze_panes = 'A3'          # the two header rows stay visible while scrolling (house file)
+    for letter in 'ABCDE':
+        ws.column_dimensions[letter].width = WIDTHS[letter]
+    # Effort widths follow the label, not the letter: adding a column shifts every
+    # letter after it, and a fixed table then gives "Front-end Development" 10.5.
+    for i, label in enumerate(labels):
+        ws.column_dimensions[get_column_letter(first_eff + i)].width = (
+            15.71 if len(label) > 12 else 12.57)
     ws.column_dimensions[get_column_letter(total_col)].width = 12.14
 
-    for col, title in enumerate(['ID', 'Module', 'Feature/Screen', 'Description',
-                                 'Assumptions, Constraints, Tech Solutions'], start=1):
+    for col, title in enumerate(T['heads'], start=1):
         ws.cell(1, col, title)
         for row in (1, 2):
             style(ws.cell(row, col), rgb=C_HEADER, bold=True, white=True)
         ws.merge_cells(start_row=1, start_column=col, end_row=2, end_column=col)
 
-    ws.cell(1, first_eff, 'EFFORT (man-hour)')
+    ws.cell(1, first_eff, T['effort'])
     for col in range(first_eff, first_eff + n_eff):
         style(ws.cell(1, col), rgb=C_EFFORT, bold=True, white=True)
     ws.merge_cells(start_row=1, start_column=first_eff,
@@ -364,7 +381,7 @@ def build_sheet(ws, spec, modules):
         ws.cell(2, first_eff + i, label)
         style(ws.cell(2, first_eff + i), rgb=C_EFFORT, bold=True, white=True)
 
-    ws.cell(1, total_col, 'Total Effort')
+    ws.cell(1, total_col, T['total_effort'])
     for row in (1, 2):
         style(ws.cell(row, total_col), rgb=C_HEADER_TOT, bold=True, white=True)
     ws.merge_cells(start_row=1, start_column=total_col, end_row=2, end_column=total_col)
@@ -418,9 +435,9 @@ def build_sheet(ws, spec, modules):
             style(ws.cell(r, 2), rgb=C_LEAF, align=A_LEFT_TOP)
             ws.cell(r, 3, item['feature'])
             style(ws.cell(r, 3), rgb=C_LEAF, align=A_LEFT_TOP)
-            ws.cell(r, 4, item.get('desc', ''))
+            ws.cell(r, 4).value = bold_labels(item.get('desc', ''))   # house BA style: bold line labels
             style(ws.cell(r, 4), rgb=C_LEAF, align=A_LEFT_TOP)
-            ws.cell(r, 5, column_e(item))
+            ws.cell(r, 5).value = bold_labels(column_e(item, lang_of(spec)))
             style(ws.cell(r, 5), rgb=C_LEAF, align=A_LEFT_TOP, bd=B_LTB)
             for i, c in enumerate(cols):
                 v = item.get(c) or 0
@@ -438,7 +455,7 @@ def build_sheet(ws, spec, modules):
     last = r - 1
     l1_rows = apply_rollup(ws, first_eff, n_eff, total_col, last)
     style(ws.cell(r, 1), rgb=C_TOTAL)
-    ws.cell(r, 2, 'TOTAL')
+    ws.cell(r, 2, T['total'])
     style(ws.cell(r, 2), rgb=C_TOTAL, bold=True, align=A_LEFT_CENTER)
     style(ws.cell(r, 3), bd=B_TB)
     style(ws.cell(r, 4), bd=B_TB)
@@ -506,7 +523,7 @@ def apply_rollup(ws, first_eff, n_eff, total_col, last):
     return l1_rows
 
 
-def column_e(item):
+def column_e(item, lang='en'):
     """Assumptions, then the technical risk block when the task carries one.
 
     The risk lives beside the assumption it qualifies rather than on a separate sheet,
@@ -515,35 +532,123 @@ def column_e(item):
     text = (item.get('assum') or '').rstrip()
     risk = item.get('risk')
     if risk:
-        text += ('\nTechnical risk (%s):\n- %s\n- Mitigation: %s'
-                 % (risk['level'], risk['risk'], risk['mitigation']))
+        T = TEXT[lang]
+        text += ('\n%s (%s):\n- %s\n- %s: %s'
+                 % (T['risk'], T['levels'].get(risk['level'], risk['level']), risk['risk'],
+                    T['mitigation'], risk['mitigation']))
     return text
+
+
+# --------------------------------------------------------------- language
+# The Cover, the Out of Scope sheet and the risk block follow the language the WBS is
+# written in, and so does every label the builder writes: never a mix of the two.
+TEXT = {
+    'en': {
+        'title': 'WORK BREAKDOWN STRUCTURE AND EFFORT ESTIMATE',
+        'subtitle': 'Development effort only: development, developer unit testing and '
+                    'code-review fixes. Whole hours.',
+        'project': 'Project', 'unit': 'Unit', 'unit_default': 'man-hours', 'mode': 'Mode',
+        'mode_fill': 'Structure supplied by the client; effort columns filled',
+        'mode_author': 'Breakdown authored from the source documents',
+        'zeros': 'Deliberate zeros', 'competitive': 'Competitive factor',
+        'competitive_off': 'Not applied. The hours are the engineering position; any '
+                           'discount is a commercial decision.',
+        'sheet_module': 'Sheet / Module', 'total': 'TOTAL', 'notes_title': 'NOTES',
+        'heads': ('ID', 'Module', 'Feature/Screen', 'Description',
+                  'Assumptions, Constraints, Tech Solutions'),
+        'effort': 'EFFORT (man-hour)', 'total_effort': 'Total Effort',
+        'labels': DEFAULT_LABELS,
+        'notes': (
+            'Every estimate covers development, developer unit testing and code-review fixes. '
+            'A dedicated QA function, project management and business analysis are not in '
+            'these numbers; allow roughly 20-25% and 15-20% respectively on top.',
+            'Assumptions that move the hours are recorded per task in column E, including the '
+            'assumed COUNT of any external integration. Anything beyond that count is a change '
+            'request at the same unit effort.',
+            'Tasks carrying real technical risk have a "Technical risk" block in column E with '
+            'the risk, its level and the mitigation already built into the approach.',
+            'The Out of Scope sheet records what is deliberately excluded and why, so the '
+            'boundary of this estimate is explicit rather than inferred.'),
+        'oos_heads': ('No', 'Item', 'Reason for Deferral'), 'oos_module': 'Related Module',
+        'risk': 'Technical risk', 'mitigation': 'Mitigation',
+        'levels': {'High': 'High', 'Medium': 'Medium'},
+    },
+    'vi': {
+        'title': 'CẤU TRÚC PHÂN RÃ CÔNG VIỆC VÀ ƯỚC LƯỢNG NỖ LỰC',
+        'subtitle': 'Chỉ gồm nỗ lực phát triển: lập trình, unit test của lập trình viên và '
+                    'sửa lỗi sau code review. Giờ nguyên.',
+        'project': 'Dự án', 'unit': 'Đơn vị', 'unit_default': 'giờ công', 'mode': 'Cách lập',
+        'mode_fill': 'Cấu trúc do khách hàng cung cấp; điền các cột nỗ lực',
+        'mode_author': 'Phân rã từ tài liệu đầu vào',
+        'zeros': 'Cố ý để 0', 'competitive': 'Hệ số cạnh tranh',
+        'competitive_off': 'Không áp dụng. Số giờ là đánh giá kỹ thuật; giảm giá (nếu có) '
+                           'là quyết định thương mại.',
+        'sheet_module': 'Sheet / Hạng mục', 'total': 'TỔNG CỘNG', 'notes_title': 'GHI CHÚ',
+        'heads': ('Mã', 'Module', 'Chức năng / Màn hình', 'Mô tả',
+                  'Giả định, Ràng buộc, Giải pháp kỹ thuật'),
+        'effort': 'NỖ LỰC (giờ công)', 'total_effort': 'Tổng nỗ lực',
+        'labels': {'ui': 'Thiết kế UI/UX', 'devops': 'Devops', 'be': 'Phát triển Back-end',
+                   'fe': 'Phát triển Front-end', 'mob': 'Mobile', 'ai': 'AI'},
+        'notes': (
+            'Mỗi ước lượng gồm lập trình, unit test của lập trình viên và sửa lỗi sau code '
+            'review. Kiểm thử (QA) chuyên trách, quản lý dự án và phân tích nghiệp vụ không nằm '
+            'trong các con số này; cộng thêm khoảng 20-25% và 15-20% tương ứng.',
+            'Các giả định làm thay đổi số giờ được ghi theo từng task ở cột E, gồm cả SỐ LƯỢNG '
+            'tích hợp bên ngoài đã giả định. Phần vượt quá số lượng đó là change request với '
+            'cùng đơn giá nỗ lực.',
+            'Task có rủi ro kỹ thuật thật có khối "Rủi ro kỹ thuật" ở cột E: rủi ro, mức độ và '
+            'cách giảm thiểu đã tính sẵn trong giải pháp.',
+            'Sheet Out of Scope ghi những gì cố ý không làm và lý do, để ranh giới của ước '
+            'lượng này rõ ràng thay vì phải suy đoán.'),
+        'oos_heads': ('STT', 'Hạng mục', 'Lý do chưa thực hiện'), 'oos_module': 'Module liên quan',
+        'risk': 'Rủi ro kỹ thuật', 'mitigation': 'Giảm thiểu',
+        'levels': {'High': 'Cao', 'Medium': 'Trung bình'},
+    },
+}
+VI_CHARS = re.compile('[ăâđêôơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]', re.I)
+
+
+def effort_labels(spec, T):
+    """Effort column labels in the WBS language. `column_labels` is honoured only for a
+    client-supplied WBS (mode fill), where the client's own wording must be kept."""
+    if spec.get('mode') == 'fill' and spec.get('column_labels'):
+        return spec['column_labels']
+    return [T['labels'].get(c, c.upper()) for c in spec['columns']]
+
+
+def lang_of(spec):
+    """'vi' or 'en': the spec's `lang`, else the language the task texts are written in."""
+    if spec.get('lang') in TEXT:
+        return spec['lang']
+    text = ' '.join(str(r.get(k) or '') for r in wbs_schema.leaf_rows(spec)[:40]
+                    for k in ('feature', 'desc'))
+    return 'vi' if len(VI_CHARS.findall(text)) > len(text) * 0.02 else 'en'
 
 
 # ------------------------------------------------------------------ Cover
 def build_cover(ws, spec, sheets):
-    span = 7
+    # Sheet/Module + one column per effort discipline + Total, so the banners and the
+    # notes cover the Total column whatever the column set is.
+    span = len(spec['columns']) + 2
     ws.sheet_view.showGridLines = False
-    for letter, width in COVER_WIDTHS.items():
-        ws.column_dimensions[letter].width = width
+    ws.column_dimensions['A'].width = COVER_WIDTHS['A']
+    for c in range(2, span + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 15
 
-    banner(ws, 1, '%s  -  WORK BREAKDOWN STRUCTURE AND EFFORT ESTIMATE'
-           % spec['project'].upper(), C_HEADER, span, 14)
+    T = TEXT[lang_of(spec)]
+    banner(ws, 1, '%s  -  %s' % (spec['project'].upper(), T['title']), C_HEADER, span, 14)
     ws.row_dimensions[1].height = 26
-    banner(ws, 2, 'Development effort only: development, developer unit testing and '
-                  'code-review fixes. Whole hours.', C_EFFORT, span)
+    banner(ws, 2, T['subtitle'], C_EFFORT, span)
 
     r = 4
-    info = [('Project', spec['project']),
-            ('Unit', spec.get('currency_note', 'man-hours')),
-            ('Mode', 'Structure supplied by the client; effort columns filled'
-                     if spec.get('mode') == 'fill'
-                     else 'Breakdown authored from the source documents')]
+    info = [(T['project'], spec['project']),
+            (T['unit'], T['unit_default'] if spec.get('currency_note') in
+             (None, '', 'man-hours', 'giờ công') else spec['currency_note']),
+            (T['mode'], T['mode_fill'] if spec.get('mode') == 'fill' else T['mode_author'])]
     if spec.get('zero_note'):
-        info.append(('Deliberate zeros', spec['zero_note']))
+        info.append((T['zeros'], spec['zero_note']))
     if spec.get('competitive', 1.0) == 1.0:
-        info.append(('Competitive factor', 'Not applied. The hours are the engineering '
-                                           'position; any discount is a commercial decision.'))
+        info.append((T['competitive'], T['competitive_off']))
     for label, value in info:
         ws.cell(r, 1, label)
         style(ws.cell(r, 1), rgb=C_L2, bold=True, align=A_LEFT_CENTER)
@@ -554,9 +659,8 @@ def build_cover(ws, spec, sheets):
         r += 1
 
     r += 1
-    labels = spec.get('column_labels') or [DEFAULT_LABELS.get(c, c.upper())
-                                           for c in spec['columns']]
-    for c, h in enumerate(['Sheet / Module'] + labels + ['Total Effort'], start=1):
+    labels = effort_labels(spec, T)
+    for c, h in enumerate([T['sheet_module']] + labels + [T['total_effort']], start=1):
         ws.cell(r, c, h)
         style(ws.cell(r, c), rgb=C_HEADER if c == 1 else (
             C_HEADER_TOT if c == len(labels) + 2 else C_EFFORT), bold=True, white=True)
@@ -584,7 +688,7 @@ def build_cover(ws, spec, sheets):
                 style(ws.cell(r, 2 + i))
             r += 1
 
-    ws.cell(r, 1, 'TOTAL')
+    ws.cell(r, 1, T['total'])
     style(ws.cell(r, 1), rgb=C_TOTAL, bold=True, align=A_LEFT_CENTER)
     for i in range(len(labels) + 1):
         letter = get_column_letter(2 + i)
@@ -592,38 +696,38 @@ def build_cover(ws, spec, sheets):
         style(ws.cell(r, 2 + i), rgb=C_TOTAL, bold=True)
     r += 2
 
-    lines = [
-        'Every estimate covers development, developer unit testing and code-review fixes. '
-        'A dedicated QA function, project management and business analysis are not in these '
-        'numbers; allow roughly 20-25% and 15-20% respectively on top.',
-        'Assumptions that move the hours are recorded per task in column E, including the '
-        'assumed COUNT of any external integration. Anything beyond that count is a change '
-        'request at the same unit effort.',
-        'Tasks carrying real technical risk have a "Technical risk" block in column E with '
-        'the risk, its level and the mitigation already built into the approach.',
-        'The Out of Scope sheet records what is deliberately excluded and why, so the '
-        'boundary of this estimate is explicit rather than inferred.',
-    ]
+    lines = list(T['notes'])
     if spec.get('zero_note'):
         lines.insert(1, spec['zero_note'])
-    notes(ws, r, span, 'NOTES', lines)
-    autofit_row_heights(ws, COVER_WIDTHS, skip_rows={1})
+    notes(ws, r, span, T['notes_title'], lines)
+    autofit_row_heights(ws, {get_column_letter(c): ws.column_dimensions[get_column_letter(c)].width
+                             for c in range(1, span + 1)}, skip_rows={1})
 
 
 def build_oos(ws, spec):
-    for letter, width in OOS_WIDTHS.items():
+    T = TEXT[lang_of(spec)]
+    entries = spec.get('out_of_scope', [])
+    widths = dict(OOS_WIDTHS)
+    heads = list(T['oos_heads'])
+    if any(e.get('module') for e in entries):
+        heads.append(T['oos_module'])
+        widths['D'] = 30.0
+    for letter, width in widths.items():
         ws.column_dimensions[letter].width = width
-    for c, h in enumerate(['No', 'Item', 'Reason for Deferral'], start=1):
+    for c, h in enumerate(heads, start=1):
         ws.cell(1, c, h)
         style(ws.cell(1, c), rgb=C_OOS_HDR, bold=True)
-    for i, entry in enumerate(spec.get('out_of_scope', []), start=1):
+    for i, entry in enumerate(entries, start=1):
         ws.cell(i + 1, 1, i)
         style(ws.cell(i + 1, 1))
         ws.cell(i + 1, 2, entry['item'])
         style(ws.cell(i + 1, 2), align=A_LEFT_CENTER)
         ws.cell(i + 1, 3, entry['reason'])
         style(ws.cell(i + 1, 3), align=A_LEFT_CENTER)
-    autofit_row_heights(ws, OOS_WIDTHS)
+        if len(heads) == 4:
+            ws.cell(i + 1, 4, entry.get('module') or '')
+            style(ws.cell(i + 1, 4), align=A_LEFT_CENTER)
+    autofit_row_heights(ws, widths)
 
 
 # ------------------------------------------------------------------ main

@@ -80,6 +80,38 @@ schedule, a multi-year commitment, spot capacity.
 Then separate the two on the sheet: what is already applied and cannot be taken again, and
 what is still available. Otherwise a reader banks the same saving twice.
 
+### Selecting a meter: what the price list does not say by name
+
+Learned on a live AWS bid (ap-southeast-1, 2026-10). Each of these would have put a wrong
+figure on the sheet that nothing downstream catches:
+
+- **usageType is not a unique key.** `APS1-BoxUsage:m7g.xlarge` is shared by Linux, RHEL,
+  SUSE and Ubuntu Pro; pin `Operating System` AND `operation=RunInstances`. RDS lists an
+  `UnusedBox` row (unused reservation) at the running-instance price; select the
+  `InstanceUsage` / `Multi-AZUsage` row. Tiered meters (S3 storage, data transfer out,
+  CloudWatch metrics, SQS) repeat the usageType per tier; pin `StartingRange`.
+  **Write each price as exact attribute filters and require them to resolve to exactly one
+  distinct price**, or the run stops. A filter that matches two prices silently keeps one.
+- **Residency lives in the meter name.** On Bedrock, a usageType ending in `cross-region`,
+  `global` or `geo` means inference may run outside the region. In ap-southeast-1 the
+  Nova 2.0 models had ONLY such meters, while the gate plan said they were in-region. When
+  residency is required, price only meters without that suffix and say so on the line.
+- **Some services are not in the regional file.** CloudFront edge transfer and requests, and
+  Route 53 hosted zones and queries, are priced in the GLOBAL offer
+  (`offers/v1.0/aws/<code>/current/index.csv`); the regional CloudFront file holds only
+  origin-shield and Lambda@Edge rows. A storage class can be missing too: the Glacier Deep
+  Archive storage meter was absent in ap-southeast-1 while its retrieval fees were present.
+  Put that on the line as a finding, priced on the nearest published meter.
+- **Re-check every availability claim the plan makes against the price list.** The plan's
+  probe looks at service codes, not meters. In one run, three claims were wrong: Nova 2.0
+  "in-region", Chime SDK "not in the index", SQS "not in the index".
+- **The re-check must compare against the vendor's CURRENT offer version.** The cache under
+  `scripts/.pricecache` is keyed by service name only. Compare the CSV preamble `Version`
+  with the version in the current offer URL before reusing a cached file. `cloud_prices.py --out`
+  leaves `prices` empty, so populate both `prices.json` and `prices_recheck.json` with the
+  SAME key spec. Then run `build_all.py --skip-price-refetch`, because its own re-fetch
+  overwrites a populated recheck file with an empty one.
+
 ## Output
 
 Report where the files were written and their headline numbers, then Phase 6. Do not

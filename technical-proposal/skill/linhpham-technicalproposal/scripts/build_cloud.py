@@ -115,12 +115,14 @@ def resolve_icon(ref: str):
 # ---- geometry (px @ 300 DPI) ---------------------------------------------------
 S = 3
 ICON = 54 * S            # official diagrams keep icons modest (airy)
-CELL_W = 140 * S
+CELL_W_BASE = 140 * S
+CELL_W = CELL_W_BASE     # widened with sqrt(font scale) in render(): bigger type needs some room
 LABEL_GAP = 5 * S
 ROW_GAP = 42 * S         # generous, even whitespace between nodes
 COL_PAD = 20 * S
 COL_HDR = 28 * S
-COL_GAP = 86 * S         # airy gutters between tiers
+COL_GAP_BASE = 86 * S    # airy gutters between tiers
+COL_GAP = COL_GAP_BASE    # widened with sqrt(font scale) in render(): edge labels live here
 WRAP_PAD = 26 * S
 WRAP_HDR = 32 * S
 BR = 5 * S               # boundary corner radius (official boxes are near-square)
@@ -139,6 +141,33 @@ def _font(sz, bold=False):
     return ImageFont.load_default()
 
 FT = {}
+FS = 1.0   # font scale; spec key "font_scale" (slide-bound figures use ~1.5 so labels land at >= 11pt)
+# PRINT SIZE. A figure is embedded about 6.5in wide (spec key "embed_inches"), and a column
+# adds width, so a five-column architecture printed its node names at ~5pt and its [tech] lines
+# and edge labels at ~3pt while every check passed. After the first layout the renderer works
+# out what the type will print at and, if it is under these floors, scales the fonts and lays
+# out again (the cell width is fixed, so bigger type wraps instead of widening the image).
+EMBED_IN = 6.5
+NODE_MIN_PT = 7.0     # node names, boundary headers
+SMALL_MIN_PT = 5.0    # [tech] lines, edge labels (04_generate item 18: 5pt or more)
+FS_MAX = 2.5
+_AUTO = {"pass": 0}
+LANG = "en"
+LEGEND_TEXT = {"en": ("Legend", "sync", "async"), "vi": ("Chú thích", "đồng bộ", "bất đồng bộ")}
+_VI_CHARS = set("ăâđêôơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ")
+
+
+def _spec_lang(spec):
+    """'vi' or 'en': the spec's "lang", else the language its own text is written in, so a
+    Vietnamese figure does not carry an English legend."""
+    lang = str(spec.get("lang", "")).lower()
+    if lang:
+        return "vi" if lang.startswith("vi") else "en"
+    text = " ".join([str(spec.get("title", ""))] +
+                    [str(n.get("label", "")) for c in spec.get("columns", []) for n in c.get("nodes", [])])
+    return "vi" if sum(ch in _VI_CHARS for ch in text.lower()) > max(3, len(text) * 0.01) else "en"
+
+
 def _init_fonts():
     # Sized against the PAGE, not against the canvas. A figure is embedded at 6.5in wide, so
     # a label lands at font_px * 72 * 6.5 / image_width points: at the old 10*S a five-column
@@ -146,8 +175,9 @@ def _init_fonts():
     # deliberately NOT raised to match, because widening the cell widens the image and the two
     # cancel out exactly; the cost of bigger text is more wrapping and a taller figure, and
     # height is the dimension with room to spare.
-    FT["title"] = _font(17 * S, True); FT["node"] = _font(14 * S, True)
-    FT["tech"] = _font(9 * S); FT["hdr"] = _font(10 * S, True); FT["edge"] = _font(9 * S)
+    f = FS
+    FT["title"] = _font(int(17 * S * f), True); FT["node"] = _font(int(14 * S * f), True)
+    FT["tech"] = _font(int(10 * S * f)); FT["hdr"] = _font(int(10 * S * f), True); FT["edge"] = _font(int(10 * S * f))
 
 def _wrap_multi(draw, text, font, maxw, maxlines=0):
     words = str(text).split(); lines = []; cur = ""
@@ -170,12 +200,13 @@ def _wrap(draw, text, font, maxw):
     downstream sees a perfectly well-formed picture.
     """
     lines = _wrap_multi(draw, text, font, maxw)
-    if len(lines) > 3:
+    cap = 3 if FS <= 1.3 else 4      # print-size scaling makes type bigger, so allow a 4th line
+    if len(lines) > cap:
         _lint_issue("label_truncated",
-                    f"the label {str(text)[:44]!r} needs {len(lines)} lines and only three fit, "
-                    f"so {' '.join(lines[3:])[:40]!r} is dropped from the figure; shorten it or "
+                    f"the label {str(text)[:44]!r} needs {len(lines)} lines and only {cap} fit, "
+                    f"so {' '.join(lines[cap:])[:40]!r} is dropped from the figure; shorten it or "
                     f"move the detail into 'tech' / 'tags'")
-    return lines[:3]
+    return lines[:cap]
 
 def _hdr_offset(has_badge):
     """left inset of a boundary's header text (past the corner category badge)."""
@@ -259,8 +290,16 @@ def _ctext(draw, cx, y, text, font, fill=TXT):
 def _node_lines(draw, n):
     lines = _wrap(draw, n.get("label", n["id"]), FT["node"], CELL_W - 6 * S)
     extra = []
-    if n.get("tech"): extra.append(("tech", f'[{n["tech"]}]'))
-    if n.get("tags"): extra.append(("tag", "  ".join(f'[{t}]' for t in n["tags"])))
+    # Wrap the [tech] and [tag] lines to the cell like the label: once print-size scaling makes
+    # the type bigger, a one-line "[BHYT, Hospital C, ERP]" runs past the column's boundary.
+    for kind, text in ((("tech", f'[{n["tech"]}]'),) if n.get("tech") else ()) + \
+                      ((("tag", "  ".join(f'[{t}]' for t in n["tags"])),) if n.get("tags") else ()):
+        parts = _wrap_multi(draw, text, FT["tech"], CELL_W - 6 * S)
+        if len(parts) > 2:
+            _lint_issue("label_truncated",
+                        f"the {kind} line {text[:44]!r} needs {len(parts)} lines and only two fit; "
+                        f"shorten it")
+        extra.extend((kind, t) for t in parts[:2])
     return lines, extra
 
 def _node_h(draw, n):
@@ -380,6 +419,15 @@ def render(spec: dict, out: Path):
     msg = straighten_columns(spec)
     if msg:
         print("  " + msg)
+    global FS, LANG, CELL_W, COL_GAP
+    FS = float(spec.get("font_scale", 1.0))
+    # Type scaled up 2x in a cell of the same width wraps every [tech] line onto three lines
+    # and makes the figure taller than the page. Widening the cell by sqrt(scale) splits the
+    # difference: the image grows a little (the scaling loop pays for it with a little more
+    # type) and the figure stays within the page height.
+    CELL_W = int(CELL_W_BASE * max(1.0, FS) ** 0.5)
+    COL_GAP = int(COL_GAP_BASE * max(1.0, FS) ** 0.5)
+    LANG = _spec_lang(spec)
     _init_fonts()
     _lint_reset()
     d0 = ImageDraw.Draw(Image.new("RGB", (8, 8)))
@@ -451,6 +499,31 @@ def render(spec: dict, out: Path):
     total_w = int(max(right, x - COL_GAP) + MARGIN)
     total_h = int(bottom + (BAND_GAP + band_h if shared else 0) + MARGIN)
 
+    embed = float(spec.get("embed_inches", EMBED_IN))
+    pt = lambda px: px * 72.0 * embed / total_w
+    node_pt = min(pt(FT["node"].size), pt(FT["hdr"].size) * NODE_MIN_PT / SMALL_MIN_PT)
+    small_pt = min(pt(FT["tech"].size), pt(FT["edge"].size))
+    need = max(NODE_MIN_PT / node_pt, SMALL_MIN_PT / small_pt)
+    if need > 1.02 and _AUTO["pass"] < 5 and FS < FS_MAX:
+        base = spec.get("font_scale")
+        spec["font_scale"] = min(FS_MAX, FS * need ** 1.5)   # overshoot: wider labels widen the image too
+        _AUTO["pass"] += 1
+        try:
+            print(f"  print size: node {node_pt:.1f}pt, small {small_pt:.1f}pt at {embed}in; "
+                  f"re-laying out with font_scale {spec['font_scale']:.2f}")
+            return render(spec, out)
+        finally:
+            _AUTO["pass"] -= 1
+            if base is None:
+                spec.pop("font_scale", None)
+            else:
+                spec["font_scale"] = base
+    if need > 1.02:
+        _lint_issue("text_too_small_in_print",
+                    f"at {embed}in wide the node names print at {node_pt:.1f}pt and the small "
+                    f"labels at {small_pt:.1f}pt (floors {NODE_MIN_PT}/{SMALL_MIN_PT}pt) even at "
+                    f"font_scale {FS:.2f}; split the figure or drop a column")
+
     global _CANVAS_W
     _CANVAS_W = total_w
     img = Image.new("RGB", (total_w, total_h), "white"); d = ImageDraw.Draw(img)
@@ -495,7 +568,7 @@ def render(spec: dict, out: Path):
     for n in idx.values():
         _node(img, d, n)
     if spec.get("legend"):
-        _legend(d, total_w - MARGIN - 96 * S, MARGIN + 2 * S)
+        _legend(d, total_w - MARGIN - (96 if LANG == "en" else 112) * S * FS, MARGIN + 2 * S)
 
     out.parent.mkdir(parents=True, exist_ok=True)
     img.save(out, format="PNG", dpi=(300, 300))
@@ -795,7 +868,11 @@ def _edge(d, a, b, e, col_index=None, col_bounds=None, lane_y=None, lane_ix=None
     _arrow(d, pts[-2], pts[-1], color)
     if e.get("label"):
         (mx, my), vert = _longest_mid(pts)   # midpoint of the longest run = always in a clear gutter
-        w = d.textlength(e["label"], font=FT["edge"]); hh = FT["edge"].size
+        # A label may carry "\n" (a figure with numbers on its edges needs two lines);
+        # textlength() refuses multi-line text, so measure the widest line.
+        lab_lines = str(e["label"]).split("\n")
+        w = max(d.textlength(t, font=FT["edge"]) for t in lab_lines)
+        hh = FT["edge"].size * len(lab_lines) + 4 * S * (len(lab_lines) - 1)
         same_col = (ci is not None and ci == cj)
         if vert:
             # A same-column (stacked) edge runs at the node centre, so its label must
@@ -812,7 +889,8 @@ def _edge(d, a, b, e, col_index=None, col_bounds=None, lane_y=None, lane_ix=None
             tx = mx - w / 2
         tx, my = _clear_label_pos(tx, my, w, hh, vert)
         d.rectangle((tx - 3, my - hh / 2 - 2, tx + w + 3, my + hh / 2 + 2), fill="white")
-        d.text((tx, my - hh / 2), e["label"], font=FT["edge"], fill=color)
+        d.multiline_text((tx, my - hh / 2), str(e["label"]), font=FT["edge"], fill=color,
+                         spacing=4 * S)
         _lint_box("edgelabel", (tx - 3, my - hh / 2 - 2, tx + w + 3, my + hh / 2 + 2))
 
 def _longest_mid(pts):
@@ -863,7 +941,9 @@ def _shared_anchor(d, spec, idx):
         return
     bx0, by0, bx1, _ = box
     x = min(max(src["_x"], bx0 + 40 * S), bx1 - 40 * S)
-    sy = src["_y"] + ICON / 2
+    # Start BELOW the node's label block, not at the icon bottom: the label (and its
+    # [tech] line) sits under the icon, so a line from the icon bottom slices through it.
+    sy = src["_y"] - ICON / 2 + _node_h(d, src) + 4 * S
     midy = (sy + by0) / 2
     pts = [(src["_x"], sy), (src["_x"], midy), (x, midy), (x, by0)]
     for i in range(len(pts) - 1):
@@ -877,15 +957,17 @@ def _shared_anchor(d, spec, idx):
         d.text((lx - w / 2, by0 - hh - 6), lbl, font=FT["edge"], fill="#607D8B")
 
 def _legend(d, x, y):
-    w = 96 * S; h = 48 * S
-    d.rounded_rectangle((x, y, x + w, y + h), radius=6 * S, fill="#FFFFFF", outline="#CBD5E0", width=2 * S)
-    d.text((x + 9 * S, y + 6 * S), "Legend", font=FT["hdr"], fill=INK)
-    ln = x + 10 * S; le = x + 30 * S; lx = x + 36 * S
-    yr1 = y + 24 * S; yr2 = y + 37 * S
+    k = S * FS   # scale the box with the fonts, or a font_scale > 1 overflows it
+    title, sync, asyn = LEGEND_TEXT.get(LANG, LEGEND_TEXT["en"])
+    w = (96 if LANG == "en" else 112) * k; h = 48 * k
+    d.rounded_rectangle((x, y, x + w, y + h), radius=6 * k, fill="#FFFFFF", outline="#CBD5E0", width=2 * S)
+    d.text((x + 9 * k, y + 6 * k), title, font=FT["hdr"], fill=INK)
+    ln = x + 10 * k; le = x + 30 * k; lx = x + 36 * k
+    yr1 = y + 24 * k; yr2 = y + 37 * k
     d.line([(ln, yr1), (le, yr1)], fill=INK, width=2 * S)
-    d.text((lx, yr1 - FT["edge"].size / 2), "sync", font=FT["edge"], fill=INK)
+    d.text((lx, yr1 - FT["edge"].size / 2), sync, font=FT["edge"], fill=INK)
     _dash(d, (ln, yr2), (le, yr2), PUR, 2 * S)
-    d.text((lx, yr2 - FT["edge"].size / 2), "async", font=FT["edge"], fill=PUR)
+    d.text((lx, yr2 - FT["edge"].size / 2), asyn, font=FT["edge"], fill=PUR)
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--spec", type=Path, required=True); ap.add_argument("--out", type=Path, required=True)

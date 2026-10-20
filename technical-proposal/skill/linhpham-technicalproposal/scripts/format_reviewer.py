@@ -656,6 +656,21 @@ _PER_BULLET_CEILINGS = {
     "phase 2 scope & triggers": 50,
 }
 
+#: The same sections under the headings translate_vi.py gives them, so a Vietnamese proposal
+#: is measured instead of reporting `narrative_length_not_measured`.
+_VI_HEADING_ALIASES = {
+    "tóm tắt tổng quan": "executive summary",
+    "mục đích": "purpose",
+    "tổng kết": "summary",
+    "chiến lược mobile app": "mobile app strategy",
+    "tổng quan hệ thống": "system overview",
+    "vấn đề và giải pháp": "problems & solutions",
+    "rủi ro chính và giảm thiểu": "key risks & mitigations",
+    "giả định và phụ thuộc": "assumptions & dependencies",
+    "mục tiêu mức dịch vụ (sla)": "service level targets",
+    "phạm vi giai đoạn 2 và điều kiện kích hoạt": "phase 2 scope & triggers",
+}
+
 
 def check_narrative_length(docx_path: Path, report: Report) -> None:
     """Core narrative sections must respect the WRITE TIGHT ceilings, and bulleted
@@ -669,6 +684,7 @@ def check_narrative_length(docx_path: Path, report: Report) -> None:
     over, long_bullets, measured = [], [], 0
     for heading, _level, bodies, _had_table in _section_bodies(doc):
         key = heading.strip().lower()
+        key = _VI_HEADING_ALIASES.get(key) or key
         cap = _NARRATIVE_CEILINGS.get(key)
         if cap is not None:
             measured += 1
@@ -1045,13 +1061,16 @@ def check_uat_section_present(docx_path: Path, report: Report) -> None:
         return
 
     body = " ".join(p.text or "" for p in doc.paragraphs).lower()
+    # Each term in English (template verbatim) and as translate_vi.py writes it, so a
+    # Vietnamese proposal is checked on its own text instead of failing on a phrase match.
     required = {
-        "the UAT completion window":     "within 14 days",
-        "no-feedback-means-accepted":    "regard the uat as successful",
-        "the critical and high fix SLA": "within 3 weeks",
-        "the rejection evidence rule":   "validated evidence",
+        "the UAT completion window":     ("within 14 days", "trong 14 ngày"),
+        "no-feedback-means-accepted":    ("regard the uat as successful", "xem uat là thành công"),
+        "the critical and high fix SLA": ("within 3 weeks", "trong 3 tuần"),
+        "the rejection evidence rule":   ("validated evidence", "bằng chứng đã kiểm chứng"),
     }
-    missing = [label for label, needle in required.items() if needle not in body]
+    missing = [label for label, needles in required.items()
+               if not any(n in body for n in needles)]
     if missing:
         report.add(Issue(
             "uat_terms_incomplete", "content", "blocker", False,
@@ -1060,6 +1079,38 @@ def check_uat_section_present(docx_path: Path, report: Report) -> None:
             detail="; ".join(missing)))
     else:
         report.pass_("uat_section_present")
+
+
+_HEADER_CHARS = 42
+
+
+def check_page_header_fits(docx_path: Path, report: Report) -> None:
+    """The page-header cell holds about 42 characters per line.
+
+    It prints "for {PROJECT_TITLE} - {CLIENT_NAME}" (or "cho ..." once translated); a longer
+    line wraps and leaves the last word of the client name alone on a third line of EVERY page.
+    The header is a table, which python-docx's header.paragraphs does not reach, so it is read
+    through the header tables.
+    """
+    doc = Document(str(docx_path))
+    long_lines = set()
+    for sec in doc.sections:
+        for part in (sec.header, sec.first_page_header):
+            for tb in part.tables:
+                for row in tb.rows:
+                    for cell in row.cells:
+                        for p in cell.paragraphs:
+                            t = (p.text or "").strip()
+                            if t.startswith(("for ", "cho ")) and len(t) > _HEADER_CHARS:
+                                long_lines.add(t)
+    if long_lines:
+        report.add(Issue(
+            "page_header_wraps", "layout", "major", False,
+            f"the page header line is over {_HEADER_CHARS} characters and wraps on every page",
+            detail="; ".join(sorted(long_lines)) + " | shorten the header copy (drop a "
+                   "parenthetical gloss), keep the full title on the cover"))
+    else:
+        report.pass_("page_header_fits")
 
 
 _BULLET_GLYPHS = "●•▪◦‣⁃"
@@ -1228,6 +1279,7 @@ CHECKS = [
     ("bullets_are_real_lists",         check_bullets_are_real_lists),
     ("bullet_spacing_uniform",         check_bullet_spacing_uniform),
     ("heading_number_not_duplicated",  check_heading_number_not_duplicated),
+    ("page_header_fits",               check_page_header_fits),
 ]
 
 

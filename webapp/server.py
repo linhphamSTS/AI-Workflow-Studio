@@ -164,6 +164,11 @@ def _child_env() -> dict:
         env["PATH"] = str(gv) + os.pathsep + env.get("PATH", "")
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
+    # Head-less `claude -p` waits only 10 minutes for subagents still running after the main
+    # turn, then kills them. A proposal's diagram-builder agents take longer than that, so the
+    # run ended with diagrams half drawn and no .docx, while the same skill in an interactive
+    # session finishes. 0 = wait for them; the job's own timeout and the Stop button still apply.
+    env["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"] = "0"
     return env
 
 
@@ -1524,9 +1529,12 @@ def export(ws_id: str, version: int | None = None):
     zpath = d / "output" / f"{slugify(meta.get('name','diagrams'))}_v{vid}.zip"
     if zpath.exists():
         zpath.unlink()
-    keep = (".png", ".svg", ".drawio", ".docx", ".json", ".md")
+    # .xlsx: a WBS workspace's deliverables are the WBS and the cost workbook.
+    keep = (".png", ".svg", ".drawio", ".docx", ".xlsx", ".json", ".md")
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
         for p in sorted(out.rglob("*")):     # recursive: covers proposal's diagrams/ subdir + docx
+            if "_work" in p.relative_to(out).parts:   # finalize.py's working copies, not deliverables
+                continue
             if p.is_file() and (p.suffix.lower() in keep) and not p.name.endswith(".spec.json") \
                     and not p.name.endswith(".meta.json") and not p.name.endswith(".lint.json"):
                 z.write(p, str(p.relative_to(out)))

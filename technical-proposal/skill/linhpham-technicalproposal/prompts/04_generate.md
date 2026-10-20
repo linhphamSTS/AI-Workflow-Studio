@@ -399,6 +399,77 @@ PNG, not by a check, so build the spec so they cannot happen:
    compliance component reads correctly and costs nothing, because the column boundary IS the
    cluster. The edge you lose (queue to worker) is one an explanation bullet states better anyway.
 
+18. **`build_sequence`: seven participants put the message labels at about 3pt on the page.** The
+   renderer sizes its fonts in canvas pixels (message 28 px, header 34 px) while the canvas grows
+   640 px per lane, so a 7-lane sequence is 4,700 px wide and, at a 7.2in embed, a message label
+   prints at `28 * 72 * 7.2 / 4700 = 3.1pt` against 10-11pt body text. Item 9's arithmetic applies to
+   sequences too. **PROMOTED TO CODE 2026-10-20 — do not wrap the renderers any more.** All three
+   renderers now size their type for the printed page (spec key `embed_inches`, default 6.5):
+   `build_sequence` scales its fonts from the canvas width so a message label prints at 6pt or more,
+   lifts each label clear of its arrow on a white plate, and wraps a long participant header;
+   `build_cloud` and `build_graph` lay out again with larger type until node names print at 7pt and
+   `[tech]` lines / edge labels at 5pt, widening the cells and gutters a little as the type grows,
+   and draw the legend in the figure's language. A figure that still cannot reach those floors
+   (too many nodes in one row or column) is reported as `text_too_small_in_print`, a
+   `diagram_check` BLOCKER: split it, change the direction or group nodes, do not shrink the type.
+   Put `embed_inches` in the spec when `diagrams.json` embeds the figure at another width.
+19. **The first diagram's `subheading` must be the literal string `System Context`.** The template
+   ships a `2.1.1 System Context` heading, and `build_docx` attaches the diagram whose subheading
+   equals `SUBHEADING_ANCHOR` to it; every other diagram is injected as a new heading AFTER it. A run
+   that titled the context diagram in the proposal's language ("Sơ đồ ngữ cảnh") got an EMPTY 2.1.1
+   heading with the figure under a new 2.1.2 directly below. Keep `System Context` (it is a technical
+   keyword) or translate the heading after assembly; never rename the subheading alone.
+20. **`build_cloud`: a fan-out into a TALL column switches to a vertical route that runs through
+   labels, and no lint sees it.** When a target sits further away vertically than horizontally
+   (`|dy| > |dx|`, and adjacent columns are only about 798 px apart), `_plan_edges` routes the edge
+   vertically, so it runs through the source column's lower node and the target column's labels.
+   Pair nodes 1:1 by row, or put the hub at the vertical centre of its column so every target
+   sits within about 1.5 rows. Two ways to keep rows level: when several edges fan into ONE
+   node, list the sources nearest the target's row first in `edges[]` (the stagger keeps that
+   order). Give paired columns the same number of tech and tag lines, because one extra label
+   line moves a node about 22 px and turns straight edges into elbows. In any one gutter, a row
+   should either receive edges or send them, never both: that is the predictable cause of
+   gotcha 14's "one wrong line".
+21. **`build_cloud` draws the legend at a fixed top-right spot, and it covers a tall right-hand
+   column's header unless a `wraps[]` boundary pushes the content down.** Not linted. It also
+   writes **no `.svg`** (only PNG + `.drawio`), whatever earlier text in this prompt says.
+22. **`build_graph`: polyline edge labels touch their own line.** A letter of "InvokeModel" or
+   "JSON schema" sat on the edge on one run. Three leading spaces on every edge label clear it.
+   Also, `edge.kind: "dependency"` draws a dark dashed line that the legend does not explain;
+   use `async` if the legend must stay true.
+23. **`build_sequence` self-call labels can also cross the NEXT lane's lifeline**, not only run off
+   the canvas (gotcha 8). With the gotcha-18 font scaling, check that
+   `cx(from) + 168 + textwidth(label)` ends before the next lane's `cx`, and move detail into
+   the bullet.
+24. **`diagram_check` measures height at a 6.5in embed and ignores `width_inches`.** A figure that
+   fits the real 7.6in budget at a narrower embed still fails `png_too_tall` if it is over 9.0in
+   at 6.5in. So first get `6.5 * h / w <= 9.0`, then use `width_inches` for the page budget.
+   **⚠ NEEDS CODE PROMOTION: `scripts/diagram_check.py` should read `width_inches` from the block.**
+25. **No diagram `subheading` may END IN A DIGIT.** `refresh_toc.py` reads each contents entry back
+   and strips trailing digits to drop the page number (`re.sub(r"\s*\d+$", "", e)`), so a heading
+   ending in a number never matches itself: "… theo Nghị định 13" came back as "… theo Nghị định"
+   and `finalize.py` stopped at step 6, after the build, review and translation had all passed.
+   Write the full citation ("Nghị định 13/2023/NĐ-CP"), or move the number off the end
+   ("MySQL 5.6 và khử trùng lặp"). Check every `subheading` with `re.search(r"\d\s*$", s)` in the
+   merge gate. **⚠ NEEDS CODE PROMOTION: `refresh_toc.py` should strip only a tab-separated page
+   number.**
+
+26. **`build_cloud`: the `shared.anchor.label` straddles the band's top border.** The label is
+   centred where the anchor line meets the band, so its lower strokes sit on the band's border line
+   ("TLS + KMS", "gates prompt + model", "identity, keys, telemetry" on three figures of one run).
+   It is not linted. Either leave the anchor label empty and name the relationship in the band's own
+   `label` and a bullet, or keep it to one or two short words and look at it. **⚠ NEEDS CODE
+   PROMOTION: `build_cloud._shared_anchor` should place the label above the band border on a white
+   plate.**
+27. **`build_graph` draws its legend in ENGLISH whatever the spec says.** Gotcha 18's "legend in the
+   figure's language" holds for `build_cloud` only: `build_graph.py` writes a literal `<B>Legend</B>`
+   plus English sample labels into the DOT source and never reads `"lang"`. A Vietnamese AI-flow
+   figure came out with "Legend / sync / async" (2026-10-20). Until the code is fixed, render through
+   a run-local wrapper in `specs/` that imports `build_graph`, swaps those three strings for
+   "Chú thích / đồng bộ / bất đồng bộ" in the generated DOT, then renders exactly as the module
+   does. Look at the legend of every `build_graph` figure on a non-English bid. **⚠ NEEDS CODE
+   PROMOTION: `build_graph.py` legend should follow `spec["lang"]` like `build_cloud.LEGEND_TEXT`.**
+
 ### VERSIONED RE-RUN — reuse the CONTENT, never the RENDERER (MANDATORY)
 
 When you are regenerating a proposal that already has a previous output (a web-app
@@ -985,6 +1056,13 @@ Management) is verbatim — do not rewrite it.
 
 **Inputs**: `requirements.json` (Phase 1) + `proposal_brief.md` (Phase 2).
 
+**Language**: write every value in the language confirmed at the gate (`plan.json`
+`"language"`). For `vi`, write Vietnamese with technical keywords kept in English, and do NOT
+translate what the template ships verbatim (Section 3, UAT, cover labels, headings):
+`translate_vi.py` does that after the review, from a fixed dictionary, so the contractual UAT
+wording is the same in every Vietnamese bid. Diagram labels follow the same language; the first
+diagram's `subheading` stays `System Context` (gotcha 19).
+
 **Output**: a `replacements.json` whose keys are placeholder tokens used in
 `proposal_template.docx` and whose values are the text to substitute. Keys
 include:
@@ -1087,7 +1165,12 @@ include:
 > row's primary product; (2) for a library row with no own logo, reuse its
 > **ecosystem** logo (e.g. put the .NET logo on every .NET row — likewise
 > `data/go` for Go libraries, `data/react` for React-ecosystem rows);
-> (3) **confirm the PNG exists in the pack before referencing it** — if a
+> (3) **confirm the PNG exists in the pack before referencing it, and LOOK at it at table size**
+> (about 0.3in): some AWS stems are nearly empty outlines that print as a blank circle or a faint
+> dashed box in the Technology column. Seen on one run: `aws/simple-storage-service-s3-object`
+> (blank circle), `aws/simple-queue-service-sqs-message` and `aws/sqs` (faint dashes). Solid
+> alternatives that read well: `aws/s3-glacier-vault`, `aws/simple-storage-service-s3-bucket-with-objects`,
+> `aws/simple-queue-service-sqs`. Check the rendered page, not the file name — if a
 > needed language/tool logo is missing, run `tools/fetch_tech_logos.mjs`
 > (devicon / simpleicons source) to add it BEFORE assembling. Omit `logo`
 > only when no sensible icon exists.
@@ -1123,6 +1206,11 @@ upstream partner exists.
   separation, so `"para one\npara two"` is what you want. On a re-run, normalise `\n{2,}` to `\n`
   across every reused string value.
 - No RFP section-number references.
+- **Point cross-references the right way.** Every optional bid section (team, delivery plan,
+  support, assumptions, case study) sits AFTER the template's verbatim development-management
+  chapter, which carries the UAT process. So a milestone that says acceptance follows "the UAT
+  process below" ("quy trình UAT dưới đây") points at nothing. Write "described above" or "đã nêu",
+  or name the section ("the quality assurance section"), never "below" for template content.
 - No phase plans / sprint plans.
 - No specific region names unless client stated one.
 - Justify alignment for body text.
@@ -1150,6 +1238,35 @@ upstream partner exists.
 - Mobile App Strategy: short and decision-only. If mobile is not in scope, set `mobile_app_strategy` to `null` and the build script will skip the section. The same null-drop applies to `techstack_data` and `techstack_ai` — only fill them when the project actually needs a data pipeline / AI layer.
 - **`summary_body`** — final wrap-up of the proposal: 3–8 short paragraphs that restate the headline architectural choice, the four commitments (tech depth, delivery confidence, IP / portability, post-go-live ownership), and the service-level targets. Per-project; do not recycle wording from prior bids.
 - **`case_study_title`** — the CASE STUDY section body itself is kept verbatim from the template (a single intro paragraph plus a hyperlink to a relevant STS case study). Only the title is per-project — set this to the name of the comparable client / engagement you want referenced. If the template's existing reference is not the best fit for this bid, flag it in the Phase 6 caveats so the user can swap the hyperlink target manually.
+### `project_title` PRINTS ON EVERY PAGE: make it a name, not the plan's description
+
+`{{PROJECT_TITLE}}` fills the cover line AND the running page header, both as
+`for {PROJECT_TITLE} - {CLIENT_NAME}`. The header has room for about **42 characters**
+(`format_reviewer` reports `page_header_wraps`). `post_assembly.py` only drops a parenthetical, so
+a descriptive title cannot pass. `plan.json` `project` is usually a description, such as "Acme
+Clinic Network: Digital Patient, Clinic and Head-Office Platform". Copied in, it produced an
+87-character header that failed the review. On the cover it left the client's last word alone on
+a third line, and full justification spread line 1 across the page.
+
+Rules:
+- Set `project_title` to a short name, about 25 characters, that names the system. The client name
+  follows it anyway, so leave the client name out of the title.
+- Do the arithmetic before building: `len("for ") + len(title) + len(" - ") + len(client)`. If it is
+  over 42, which it is whenever the client name is long, repair the HEADER copy only, through
+  `finalize.py --post`: set it to `for <title>` and keep the full line on the cover.
+- On the cover, bind the client name with non-breaking spaces so it wraps as one unit, and centre
+  that paragraph like the title above it. **Glue the separator hyphen to the TITLE, not to the
+  client:** write `<title> - <client with NBSPs>`. Binding it the other way (` - <client>`)
+  moves the hyphen down with the client, so line 2 of the cover STARTS with "- MediLink Clinic
+  Network" (seen 2026-10-20). Break after the hyphen, never before it.
+- Look at the cover page in the visual pass. No check reads it.
+
+**Header: PROMOTED TO CODE.** `post_assembly.fix_page_header` now drops the trailing ` - <client>`
+from the header copy when the line exceeds 42 characters (verified 2026-10-20: a 32-character title
+gave `for <title>` with no `--post` repair). The cover still needs the `--post` repair above.
+**⚠ NEEDS CODE PROMOTION:** the template's cover subtitle should be centred, not justified, and
+bind the client name itself.
+
 ### RFP-driven optional sections — fill only what the client actually asked for
 
 The template carries these sections with a `{{KEY}}` slot each. **Every one defaults to
@@ -1174,6 +1291,30 @@ the ones it asks for. Filling a section the client never requested is padding.
 | `risk_register` | › Key Risks & Mitigations | a risk view; each entry states the risk, its impact and the mitigation already built into the approach |
 | `references` | CASE STUDY › References | client references |
 | `contractual_exceptions` | CONTRACTUAL EXCEPTIONS | exceptions to the client's contract terms |
+
+**Assumptions and risks travel together.** The group heading `ASSUMPTIONS, DEPENDENCIES & RISKS`
+stays in the document as long as EITHER of its two keys is filled, so a run that filled
+`assumptions_dependencies` and left `risk_register` null shipped a chapter whose title promised
+risks it never listed. Fill both or neither. For a fixed-deadline bid the register writes itself
+from the dependencies already listed: each dependency the client owns (an identity system, a
+payment sandbox, a cloud account and its quotas) is a risk to the date, with the mitigation the
+approach already carries (a mock to work against, a request raised at kick-off, a load test that
+proves it). **⚠ NEEDS CODE PROMOTION: `build_docx.OPTIONAL_SECTION_GROUPS` — when one of a group's
+keys is dropped, retitle the group heading or fail the build.**
+
+### THE HEADLINE NON-FUNCTIONAL REQUIREMENT GETS ITS OWN SECTION, WITH THE SIZING MODEL
+
+When one non-functional figure decides the bid (100,000 buyers in a queue, a 2-second SLA, a
+million records a night), one-line mentions in the summary and in Problems & Solutions do not sell
+it. Give it its own diagram section right after the reference architecture: a funnel or flow figure
+with the design number ON each edge, an intro that says what the big number is and is not (people
+in a queue are not requests on the backend), and explanation bullets that show the division: the
+admission rate, the concurrent users it implies, requests per second at peak with the safety
+multiple, writes per second on the database, how contention is held, what happens when a tier
+saturates, and the load-test scenarios with scoped pass criteria. State the example the numbers are
+computed for (an event size, a session length) so the reader can redo the arithmetic. **If the
+numbers sit on edge labels, keep them short: `build_cloud` now scales edge labels to print at 5pt
+or more (gotcha 18), and a two-line label can be written with `\n`.**
 
 ### EVERY COMMITMENT MUST NAME ITS SCOPE
 
@@ -1311,6 +1452,17 @@ longer name the components, and the requirement that the figure be re-drawable f
 bullets alone is lost. **Keep 7 to 17 bullets. Cut the words inside each one, and cut the
 intro.** Twelve tight bullets beat six loose ones at the same word budget and say far more.
 
+
+**Budget the figures from the FIGURE COUNT before you brief the diagram agents.** The per-bullet
+ceilings alone do not hold the document budget once the plan carries many figures. Measured on a
+nine-figure run (2026-10-20) where every figure met every per-bullet rule (avg 21.7 to 24.7 words,
+7 to 17 bullets): the figures came to 3,554 words (130 bullets, 394 per figure), the stack tables
+1,232, the other prose 2,893 and the template's verbatim block about 1,900, so the delivered body
+was about 9,600 words against 8,000. Agents briefed only with "7 to 17" write toward 17. So derive
+a per-figure word allowance first (about 2,400 words of figures for a 8,000-word document, which is
+about 270 per figure at nine figures, that is one intro of 50 and about 9 bullets of 24), put the
+bullet COUNT for each figure in the agent brief, and spend the extra bullets only on the reference
+architecture and the headline-requirement figure.
 
 Cutting length must never cut requirement coverage. If a real requirement can only be
 answered at length, answer it and say in the Phase 6 report which budget it broke and why.
@@ -1569,4 +1721,14 @@ python scripts/check_consistency.py --plan spec/plan.json
 A cloud mismatch between the stack and the figures costs a whole regeneration if it
 is found afterwards, and this finds it in a second. Run it once the plan is settled
 and again with `--diagrams` as soon as the figure specs exist, rather than waiting
-for the format review.
+for the format review. If it fails on the PLAN alone because a rejected cloud is named in a
+rationale, see the note under the stack table in `02_analyze.md`: fix the wording in the plan
+(keep a `plan.json.bak_<date>` beside it and say so in the report), never the decision.
+
+**Vietnamese proposals: every ceiling is counted in SYLLABLES.** `format_reviewer` uses
+`str.split()`, and Vietnamese writes one syllable per token, so the English-calibrated ceilings
+are roughly 40% tighter in content. They are still reachable (one run: executive summary 249 of
+260, every problem and solution pair 55 or under) if you count with the reviewer's rule in the
+generator. Problems-and-solutions pairs and four-word entry labels are what break first. For diagram
+bullets, which nothing in the reviewer measures, that run gated at 34 per bullet and an average
+of 28. That is a deliberate allowance for syllables, not the English 30/25.

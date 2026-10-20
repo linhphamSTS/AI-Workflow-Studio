@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -478,21 +479,88 @@ def _lint_layout(engine_bin: str, src: str, out: Path) -> None:
         lint_path.unlink()
 
 
+# PRINT SIZE. Graphviz lays out in inches at dpi=300 and the figure is embedded about 6.5in wide
+# (spec "embed_inches"), so a node label prints at fontsize * 6.5 / graph_width_in. A wide graph
+# printed its node labels near 5pt and its edge labels near 4pt. After a render the type is
+# scaled until node labels reach NODE_MIN_PT and edge labels SMALL_MIN_PT, then re-laid out.
+EMBED_IN = 6.5
+NODE_MIN_PT = 7.0
+SMALL_MIN_PT = 5.0
+FS_MAX = 2.5
+_FONT_RE = re.compile(r'(fontsize=|POINT-SIZE=")(\d+(?:\.\d+)?)')
+
+
+def _scale_fonts(src: str, k: float) -> str:
+    if abs(k - 1.0) < 1e-3:
+        return src
+    return _FONT_RE.sub(lambda m: f"{m.group(1)}{float(m.group(2)) * k:.1f}", src)
+
+
+_VI_CHARS = set("ăâđêôơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ")
+_LEGEND_VI = {"<B>Legend</B>": "<B>Chú thích</B>",
+              " synchronous (request / response)": " đồng bộ (request / response)",
+              " asynchronous (event, dashed)": " bất đồng bộ (sự kiện, nét đứt)"}
+
+
+def _spec_lang(spec: dict) -> str:
+    """'vi' or 'en': the spec's "lang", else the language of its own title and labels."""
+    lang = str(spec.get("lang", "")).lower()
+    if lang:
+        return "vi" if lang.startswith("vi") else "en"
+    text = " ".join([str(spec.get("title", ""))] + [str(n.get("label", "")) for n in spec.get("nodes", [])])
+    return "vi" if sum(ch in _VI_CHARS for ch in text.lower()) > max(3, len(text) * 0.01) else "en"
+
+
 def render(spec: dict, out: Path, emit_drawio: bool = True) -> Path:
     dot_bin = ensure_dot()
-    src = build_dot(spec)
+    base_src = build_dot(spec)
+    if _spec_lang(spec) == "vi":   # a Vietnamese figure must not carry an English legend
+        for a, b in _LEGEND_VI.items():
+            base_src = base_src.replace(a, b)
     out.parent.mkdir(parents=True, exist_ok=True)
     engine = (spec.get("engine") or ENGINE_BY_TYPE.get((spec.get("diagram_type") or "").lower()) or "dot").lower()
     # dot_bin points at `dot`; other engines live beside it in the same bin/.
     engine_bin = str(Path(dot_bin).with_name(("dot" if engine == "dot" else engine) +
                                              (".exe" if dot_bin.endswith(".exe") else "")))
-    proc = subprocess.run([engine_bin, "-Tpng", "-o", str(out)],
-                          input=src, capture_output=True, text=True, encoding="utf-8",
-                          creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0))
-    if proc.returncode != 0:
-        raise RuntimeError(f"Graphviz render failed ({engine}):\n{proc.stderr}\n--- DOT ---\n{src}")
+    embed = float(spec.get("embed_inches", EMBED_IN))
+    k = float(spec.get("font_scale", 1.0))
+    need, node_pt, edge_pt = 1.0, 0.0, 0.0
+    for _attempt in range(5):
+        src = _scale_fonts(base_src, k)
+        proc = subprocess.run([engine_bin, "-Tpng", "-o", str(out)],
+                              input=src, capture_output=True, text=True, encoding="utf-8",
+                              creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0))
+        if proc.returncode != 0:
+            raise RuntimeError(f"Graphviz render failed ({engine}):\n{proc.stderr}\n--- DOT ---\n{src}")
+        try:
+            from PIL import Image
+            with Image.open(out) as _im:
+                w_in = _im.size[0] / 300.0
+        except Exception:  # noqa: BLE001
+            break
+        node_pt = 13 * k * embed / w_in
+        edge_pt = 11 * k * embed / w_in
+        need = max(NODE_MIN_PT / node_pt, SMALL_MIN_PT / edge_pt)
+        if need <= 1.02 or k >= FS_MAX:
+            break
+        k = min(FS_MAX, k * need ** 1.5)
+        print(f"  print size: node {node_pt:.1f}pt, edge {edge_pt:.1f}pt at {embed}in; "
+              f"re-laying out with font scale {k:.2f}")
     print(f"Rendered {out}")
     _lint_layout(engine_bin, src, out)
+    if need > 1.02:
+        # Scaled to the cap and still too small: the graph is too wide for a page (one rank
+        # holding many nodes). Say so as a blocker rather than ship unreadable type.
+        lint_path = out.with_suffix(".lint.json")
+        issues = json.loads(lint_path.read_text(encoding="utf-8")) if lint_path.exists() else []
+        issues.append({"code": "text_too_small_in_print",
+                       "msg": f"at {embed}in wide the node labels print at {node_pt:.1f}pt and the "
+                              f"edge labels at {edge_pt:.1f}pt (floors {NODE_MIN_PT}/{SMALL_MIN_PT}pt) "
+                              f"even at font scale {k:.2f}; change the direction, group the nodes "
+                              f"into clusters, or split the figure"})
+        lint_path.write_text(json.dumps(issues, indent=2), encoding="utf-8")
+        print(f"! [lint] text_too_small_in_print: node {node_pt:.1f}pt, edge {edge_pt:.1f}pt",
+              file=sys.stderr)
 
     # Sharpness for Word: build_docx.py inserts every figure at width = 6.5in, so the
     # effective DPI is width_px / 6.5. A small graph rendered at dpi=300 can come out
